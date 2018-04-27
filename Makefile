@@ -1,4 +1,4 @@
-CFLAGS = -std=c++11
+CFLAGS = -std=c++11 -w
 
 p2pim : p2pim.cpp
 	$(CXX) $(CFLAGS) $^ -o $@
