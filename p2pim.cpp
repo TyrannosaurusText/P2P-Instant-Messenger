@@ -3,13 +3,9 @@
 #include <functional>
 #include <cstring>
 #include <unordered_map>
+#include "p2pim.h"
 
-#define DEBUG 1
-#ifdef DEBUG
-#define dprint(string, ...) printf(string,__VA_ARGS__)
-#else
-#define dprint(string, ...) 
-#endif
+
 std::unordered_map<std::string, int> commandswitch;
 //std::string userName = std::string(getenv("USERNAME"));
 int udpPort = 50550;
@@ -29,34 +25,7 @@ int main(int argc, char** argv) {
 	commandswitch["-dt"] = 4;
 	commandswitch["-dt"] = 5;
 	commandswitch["-pp"] = 6;
-/*     for(int i = 1; i < argc; i++) {
-        optErr = argv[i];
-        if(strcmp("-u", argv[i]) == 0) {
-            if(i == argc - 1 || argv[i + 1][0] == '-')
-                goto ERROR_HANDLING;
 
-            userName = argv[i];
-        }
-        else if(strcmp("-up", argv[i]) == 0) {
-            if(i == argc - 1 || argv[i + 1][0] == '-')
-                goto ERROR_HANDLING;
-        }
-        else if(strcmp("-tp", argv[i]) == 0) {
-            if(i == argc - 1 || argv[i + 1][0] == '-')
-                goto ERROR_HANDLING;
-        }
-        else if(strcmp("-dt", argv[i]) == 0) {
-            if(i == argc - 1 || argv[i + 1][0] == '-')
-                goto ERROR_HANDLING;
-        }
-        else if(strcmp("-dm", argv[i]) == 0) {
-            if(i == argc - 1 || argv[i + 1][0] == '-')
-                goto ERROR_HANDLING;
-        }
-        // else if(strcmp("-pp", argv[i]) == 0) {
-            
-        // }
-    } */
 	for(int i = 1; i < argc; i++){
 		dprint("val: %s\n", argv[i]);
 		switch(commandswitch[argv[i]])
@@ -77,11 +46,60 @@ int main(int argc, char** argv) {
 		}
 	}
 	
+	
+		
+	struct termios SavedTermAttributes;
+    char RXChar;
+    
+   /*  SetNonCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
+    
+    while(1){
+        read(STDIN_FILENO, &RXChar, 1);
+        if(0x04 == RXChar){ // C-d
+            break;
+        }
+        else{
+            if(isprint(RXChar)){
+                printf("RX: '%c' 0x%02X\n",RXChar, RXChar);   
+            }
+            else{
+                printf("RX: ' ' 0x%02X\n",RXChar);
+            }
+        }
+    }
+    
+    ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); */
+	
     return 0;
 
 
 ERROR_HANDLING:
     fprintf(stderr, "./p2pim: option requires an argument -- '%s'\n", optErr.c_str());
 	exit(1);
+}
+
+void ResetCanonicalMode(int fd, struct termios *savedattributes){
+    tcsetattr(fd, TCSANOW, savedattributes);
+}
+
+void SetNonCanonicalMode(int fd, struct termios *savedattributes){
+    struct termios TermAttributes;
+    char *name;
+    
+    // Make sure stdin is a terminal. 
+    if(!isatty(fd)){
+        fprintf (stderr, "Not a terminal.\n");
+        exit(0);
+    }
+    
+    // Save the terminal attributes so we can restore them later. 
+    tcgetattr(fd, savedattributes);
+    
+    // Set the funny terminal modes. 
+    tcgetattr (fd, &TermAttributes);
+    TermAttributes.c_lflag &= ~(ICANON | ECHO); // Clear ICANON and ECHO. 
+    TermAttributes.c_cc[VMIN] = 1;
+    TermAttributes.c_cc[VTIME] = 0;
+    tcsetattr(fd, TCSAFLUSH, &TermAttributes);
 }
 
