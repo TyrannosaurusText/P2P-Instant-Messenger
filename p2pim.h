@@ -17,7 +17,7 @@
 #include <ifaddrs.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-
+#include <poll.h>
 
 
 #define DEBUG 1
@@ -30,5 +30,7 @@
 
 void ResetCanonicalMode(int fd, struct termios *savedattributes);
 void SetNonCanonicalMode(int fd, struct termios *savedattributes);
-void ERROR_HANDLING();
+void ERROR_HANDLING();void die(const char* message);
+int getType(uint8_t* message);
+void getHostNUserName(uint8_t* message, std::string& hostName, std::string& userName);
 std::string getHostName();
