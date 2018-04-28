@@ -8,17 +8,22 @@
 #include <cstring>
 #include <unordered_map>
 #include <arpa/inet.h>
+#include <poll.h>
 
 
 
 #define DEBUG 1
+
 #ifdef DEBUG
-#define dprint(string, ...) printf(string,__VA_ARGS__)
+    #define dprint(string, ...) printf(string,__VA_ARGS__)
 #else
-#define dprint(string, ...) 
+    #define dprint(string, ...) 
 #endif
 
 
 void ResetCanonicalMode(int fd, struct termios *savedattributes);
 void SetNonCanonicalMode(int fd, struct termios *savedattributes);
 void ERROR_HANDLING();
+void die(const char* message);
+int getType(uint8_t* message);
+void getHostNUserName(uint8_t* message, std::string& hostName, std::string& userName);
