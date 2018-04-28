@@ -169,7 +169,7 @@ int main(int argc, char** argv) {
         gettimeofday(&end, NULL);
         timePassed = ((end.tv_sec-start.tv_sec)*1000000 + end.tv_usec-start.tv_usec)/1000;
         currTimeout -= timePassed;
-        
+
         // Timeout event
         if(0 == rc) {
             dprint("TIMEOUT\n", 0);
@@ -202,7 +202,19 @@ int main(int argc, char** argv) {
             dprint("ERROR\n", 0);
     }
 
-	
+
+    uint8_t closingMsg[sizeof(discoveryMsg)];
+    memcpy(closingMsg, discoveryMsg, sizeof(discoveryMsg));
+
+    *((uint16_t*)closingMsg + 2) = htons(3);  
+
+	if(sendto(udpSockFd, closingMsg, discoveryMsgLen, 0, 
+        (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+        die("Failed to send discovery message");
+    }
+
+    dprint("Bye...\n", 0);
+
 	struct termios SavedTermAttributes;
     char RXChar;
     
