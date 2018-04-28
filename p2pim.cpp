@@ -38,12 +38,12 @@ int main(int argc, char** argv) {
     commandswitch["-pp"] = 6;
 
 	for(int i = 1; i < argc; i++){
-		dprint("val: %s\n", argv[i]);
+		// dprint("val: %s\n", argv[i]);
         optErr = argv[i];
 
         if(commandswitch.find(argv[i]) != commandswitch.end()) {
             if(i == argc - 1 || argv[i + 1][0] == '-')
-                    ERROR_HANDLING();
+                    ERROR_HANDLING(argv);
         }
 
 		switch(commandswitch[argv[i]])
@@ -85,7 +85,7 @@ int main(int argc, char** argv) {
    //          }
 			default: {
 				dprint("default\n",0);
-                ERROR_HANDLING();
+                ERROR_HANDLING(argv);
             }
 		}
 	}
@@ -146,30 +146,32 @@ int main(int argc, char** argv) {
     pollFd.fd = udpSockFd;
     pollFd.events = POLLIN;
 
-    int rc = poll(&pollFd, 1, currTimeout);
+    while(currTimeout <= maxTimeout * 1000) {
+        int rc = poll(&pollFd, 1, currTimeout);
 
-    // Timeout event
-    if(0 == rc) {
-        dprint("TIMEOUT\n", 0);
+        // Timeout event
+        if(0 == rc) {
+            dprint("TIMEOUT\n", 0);
 
-        // Double current timeout
-        currTimeout *= 2; 
-    }
-    else if(rc > 0 && POLLIN == pollFd.revents) {
-        dprint("RECV\n", 0);
-        // Reply message
-        clientAddrLen = sizeof(clientAddr);
-        int recvLen = recvfrom(udpSockFd, replyMsg, MAX_REPLY_MSG_LEN, 0,
-            (struct sockaddr*)&clientAddr, &clientAddrLen);
-
-        if(recvLen > 0) {
-            std::string newHostName, newUserName;
-            getHostNUserName(replyMsg, newHostName, newUserName);
-            dprint("%s %s\n", newHostName.c_str(), newUserName.c_str());
+            // Double current timeout
+            currTimeout *= 2; 
         }
+        else if(rc > 0 && POLLIN == pollFd.revents) {
+            dprint("RECV\n", 0);
+            // Reply message
+            clientAddrLen = sizeof(clientAddr);
+            int recvLen = recvfrom(udpSockFd, replyMsg, MAX_REPLY_MSG_LEN, 0,
+                (struct sockaddr*)&clientAddr, &clientAddrLen);
+
+            if(recvLen > 0) {
+                std::string newHostName, newUserName;
+                getHostNUserName(replyMsg, newHostName, newUserName);
+                dprint("%s %s\n", newHostName.c_str(), newUserName.c_str());
+            }
+        }
+        else
+            dprint("ERROR\n", 0);
     }
-    else
-        dprint("ERROR\n", 0);
 
 	
 	struct termios SavedTermAttributes;
@@ -199,15 +201,18 @@ int main(int argc, char** argv) {
     return 0;
 }
 
-void ERROR_HANDLING(){
-    fprintf(stderr, "./p2pim: option requires an argument -- '%s'\n", optErr.c_str());
+
+
+void ERROR_HANDLING(char** argv){
+    fprintf(stderr, "%s: option requires an argument -- '%s'\n", argv[0], optErr.c_str());
 	exit(1);
 }
 
 
+// Internal syscall errors
 void die(const char *message) {
     perror(message);
-    exit(0);
+    exit(1);
 }
 
 int getType(uint8_t* message) {
