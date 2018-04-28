@@ -129,7 +129,7 @@ int main(int argc, char** argv) {
     ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); */
 	
     return 0;
-
+}
 
 void ERROR_HANDLING(){
     fprintf(stderr, "./p2pim: option requires an argument -- '%s'\n", optErr.c_str());
