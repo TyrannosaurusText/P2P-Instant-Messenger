@@ -8,6 +8,15 @@
 #include <cstring>
 #include <unordered_map>
 #include <arpa/inet.h>
+#include <sys/types.h>
+#include <string.h> 
+#include <ifaddrs.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h> 
+#include <ifaddrs.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 #include <poll.h>
 
 
@@ -27,3 +36,4 @@ void ERROR_HANDLING(char** argv);
 void die(const char* message);
 int getType(uint8_t* message);
 void getHostNUserName(uint8_t* message, std::string& hostName, std::string& userName);
+std::string getHostName();

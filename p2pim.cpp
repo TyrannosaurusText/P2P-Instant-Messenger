@@ -1,3 +1,4 @@
+
 #include "p2pim.h"
 
 
@@ -24,11 +25,8 @@ struct pollfd pollFd;
 
 
 int main(int argc, char** argv) {
-	int currTimeout = initTimeout * 1000;
-    char tmp[1024];
-
-    gethostname(tmp, 1024);
-    hostName = tmp;
+    int currTimeout = initTimeout * 1000;
+    hostName = std::string(getHostName());
 
     commandswitch["-u"] = 1;
     commandswitch["-up"] = 2;
@@ -207,7 +205,21 @@ void ERROR_HANDLING(char** argv){
     fprintf(stderr, "%s: option requires an argument -- '%s'\n", argv[0], optErr.c_str());
 	exit(1);
 }
+std::string getHostName()
+{
+	char Buffer[256];
 
+	
+	if(-1 == gethostname(Buffer, 255)){
+        printf("Unable to resolve host name.");
+		exit(-1);
+    }
+
+    struct hostent *LocalHostEntry = gethostbyname(Buffer);
+	strcpy(Buffer, LocalHostEntry->h_name);
+	std::string temp(Buffer);
+	return temp;
+}
 
 // Internal syscall errors
 void die(const char *message) {
@@ -222,4 +234,14 @@ int getType(uint8_t* message) {
 void getHostNUserName(uint8_t* message, std::string& hostName, std::string& userName) {
     hostName = (char*)(message + 10);
     userName = (char*)(message + 10 + hostName.length() + 1);
+}
+
+
+void dump(std::string msg)
+{
+	for(int i = 0; i < msg.length(); i++)
+    {
+        dprint("%d %c \n", msg[i], msg[i]);
+    }
+    dprint("\n", 0);
 }
