@@ -11,8 +11,8 @@ std::string userName = getenv("USER");
 std::string hostName;
 int udpPort = 50550;
 int tcpPort = 50551;
-int initTimeout = 5;
-int maxTimeout = 60;
+int initTimeout = 5000;
+int maxTimeout = 60000;
 // int destPort = ls
 std::string optErr;
 
@@ -25,7 +25,6 @@ struct pollfd pollFd;
 
 
 int main(int argc, char** argv) {
-    int currTimeout = initTimeout * 1000;
     hostName = std::string(getHostName());
 
     commandswitch["-u"] = 1;
@@ -116,6 +115,8 @@ int main(int argc, char** argv) {
     }
     dprint("\n", 0);
 
+    int recvReply = 0;
+
     // Send discovery message
     udpSockFd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
@@ -124,37 +125,63 @@ int main(int argc, char** argv) {
     }
 
     broadcastEnable = 1;
-    if(setsockopt(udpSockFd, SOL_SOCKET, SO_BROADCAST, &broadcastEnable, 
+    if(setsockopt(udpSockFd, SOL_SOCKET, SO_REUSEPORT & SO_BROADCAST, &broadcastEnable, 
         sizeof(broadcastEnable)) < 0) {
         close(udpSockFd);
         die("Failed to set socket option");
     }
-
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
     serverAddr.sin_port = htons(udpPort);
 
-    // if(sendto(udpSockFd, discoveryMsg, discoveryMsgLen, 0, 
-    //     (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
-    //     die("Failed to send discovery message");
-    // }
+    if(-1 == bind(udpSockFd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)))
+        die("Failed to bind socket");
+    
 
 
-    // Wait for reply message
+
     pollFd.fd = udpSockFd;
     pollFd.events = POLLIN;
+    int baseTimeout = initTimeout;
+    timeval start,end;
+    int timePassed;
 
-    while(currTimeout <= maxTimeout * 1000) {
+
+    int currTimeout = 0;
+
+    while(!recvReply && currTimeout <= maxTimeout * 1000) {
+        
+        if(currTimeout <= 0) {
+            if(sendto(udpSockFd, discoveryMsg, discoveryMsgLen, 0, 
+                (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+                die("Failed to send discovery message");
+
+            }
+            currTimeout=baseTimeout;
+            dprint("YO\n", 0);
+        }
+
+
+        // Wait for reply message
+    
+        gettimeofday(&start, NULL);
         int rc = poll(&pollFd, 1, currTimeout);
-
+        gettimeofday(&end, NULL);
+        timePassed = ((end.tv_sec-start.tv_sec)*1000000 + end.tv_usec-start.tv_usec)/1000;
+        currTimeout -= timePassed;
+        
         // Timeout event
         if(0 == rc) {
             dprint("TIMEOUT\n", 0);
 
             // Double current timeout
-            currTimeout *= 2; 
+            baseTimeout *= 2;
+            dprint("%d\n", currTimeout);
+
         }
         else if(rc > 0 && POLLIN == pollFd.revents) {
+            std::string newHostName, newUserName;
+
             dprint("RECV\n", 0);
             // Reply message
             clientAddrLen = sizeof(clientAddr);
@@ -162,10 +189,14 @@ int main(int argc, char** argv) {
                 (struct sockaddr*)&clientAddr, &clientAddrLen);
 
             if(recvLen > 0) {
-                std::string newHostName, newUserName;
                 getHostNUserName(replyMsg, newHostName, newUserName);
                 dprint("%s %s\n", newHostName.c_str(), newUserName.c_str());
             }
+
+            if(newHostName == hostName)
+                dprint("Self discovery\n", 0);
+            else
+                recvReply = 1;
         }
         else
             dprint("ERROR\n", 0);
