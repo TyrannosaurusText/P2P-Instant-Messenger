@@ -8,6 +8,15 @@
 #include <cstring>
 #include <unordered_map>
 #include <arpa/inet.h>
+#include <sys/types.h>
+#include <string.h> 
+#include <ifaddrs.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h> 
+#include <ifaddrs.h>
+#include <arpa/inet.h>
+#include <unistd.h>
 
 
 
@@ -22,3 +31,4 @@
 void ResetCanonicalMode(int fd, struct termios *savedattributes);
 void SetNonCanonicalMode(int fd, struct termios *savedattributes);
 void ERROR_HANDLING();
+std::string getHostName();
