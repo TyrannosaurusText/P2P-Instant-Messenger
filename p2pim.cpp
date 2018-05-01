@@ -5,13 +5,18 @@
 #define MAX_REPLY_MSG_LEN (10 + 64 + 32 + 2)
 
 
-std::unordered_map<std::string, int> commandswitch;
+enum Option {USERNAME, UDP_PORT, TCP_PORT, MIN_TIMEOUT, MAX_TIMEOUT, HOST};
+
+static std::unordered_map<std::string, int> optionMap {
+    {"-u", USERNAME}, {"-up", UDP_PORT}, {"-tp", TCP_PORT}, 
+    {"-dt", MIN_TIMEOUT}, {"dm", MAX_TIMEOUT}, {"pp", HOST}
+};
 
 std::string userName = getenv("USER");
 std::string hostName;
 int udpPort = 50550;
 int tcpPort = 50551;
-int initTimeout = 5000;
+int minTimeout = 5000;
 int maxTimeout = 60000;
 // int destPort = ls
 std::string optErr;
@@ -25,59 +30,56 @@ struct pollfd pollFd;
 
 
 int main(int argc, char** argv) {
+    // Get default hostname
     hostName = std::string(getHostName());
 
-    commandswitch["-u"] = 1;
-    commandswitch["-up"] = 2;
-    commandswitch["-tp"] = 3;
-    commandswitch["-dt"] = 4;
-    commandswitch["-dt"] = 5;
-    commandswitch["-pp"] = 6;
-
+    // Iterate through all options
 	for(int i = 1; i < argc; i++){
 		// dprint("val: %s\n", argv[i]);
         optErr = argv[i];
 
-        if(commandswitch.find(argv[i]) != commandswitch.end()) {
+        // Check if option is valid
+        if(optionMap.find(argv[i]) != optionMap.end()) {
             if(i == argc - 1 || argv[i + 1][0] == '-')
                     ERROR_HANDLING(argv);
         }
 
-		switch(commandswitch[argv[i]])
+        // Handle options
+		switch(optionMap[argv[i]])
 		{
-			case 1: {
-                commandswitch[argv[i]] = -1;
+			case USERNAME: {
+                optionMap[argv[i]] = 0;
                 userName = argv[i + 1];
                 break;
             }
-			case 2: {
-                commandswitch[argv[i]] = -1;
+			case UDP_PORT: {
+                optionMap[argv[i]] = 0;
                 // TODO: Should check port number range
                 udpPort = atoi(argv[i + 1]);
                 break;
             }
-			case 3: {
-                commandswitch[argv[i]] = -1;
+			case TCP_PORT: {
+                optionMap[argv[i]] = 0;
                 // TODO: Should check port number range
                 tcpPort = atoi(argv[i + 1]);
                 break;
             }
-			case 4: {
-                commandswitch[argv[i]] = -1;
+			case MIN_TIMEOUT: {
+                optionMap[argv[i]] = 0;
                 // TODO: Should validate argument is a number
-                initTimeout = atoi(argv[i + 1]);
+                minTimeout = atoi(argv[i + 1]);
                 break;
             }
-			case 5: {
-                commandswitch[argv[i]] = -1;
+			case MAX_TIMEOUT: {
+                optionMap[argv[i]] = 0;
                 // TODO: Should validate argument is a number
                 maxTimeout = atoi(argv[i + 1]);
                 break;
             }
             // TODO:
-			// case 6: {
-   //              commandswitch[argv[i]] = -1;
-   //              initTimeout = atoi(argv[i + 1]);
+			// case HOST: {
+   //              optionMap[argv[i]] = -1;
+   //              minTimeout = atoi(argv[i + 1]);
    //              break;
    //          }
 			default: {
@@ -87,19 +89,19 @@ int main(int argc, char** argv) {
 		}
 	}
 
-    dprint("Username = %s\n", userName.c_str());
-    // TODO: Hostname = sp4.cs.ucdavis.edu
-    dprint("Hostname = %s\n", hostName.c_str());
-    dprint("UDP Port = %d\n", udpPort);
-    dprint("TCP Port = %d\n", tcpPort);
-    dprint("Mintimeout = %d\n", initTimeout);
-    dprint("Maxtimeout = %d\n", maxTimeout);
+    // dprint("Username = %s\n", userName.c_str());
+    // // TODO: Hostname = sp4.cs.ucdavis.edu
+    // dprint("Hostname = %s\n", hostName.c_str());
+    // dprint("UDP Port = %d\n", udpPort);
+    // dprint("TCP Port = %d\n", tcpPort);
+    // dprint("Mintimeout = %d\n", minTimeout);
+    // dprint("Maxtimeout = %d\n", maxTimeout);
 
 
     // Construct discovery message
     int discoveryMsgLen = 10 + hostName.length() + 1 + userName.length() + 1;
     uint8_t discoveryMsg[discoveryMsgLen], replyMsg[MAX_REPLY_MSG_LEN];
-    bzero(discoveryMsg,discoveryMsgLen);
+    memset(discoveryMsg, 0, discoveryMsgLen);
 
     memcpy((uint32_t*)discoveryMsg, "P2PI", 4);
     *((uint16_t*)discoveryMsg + 2) = htons(1);
@@ -109,27 +111,28 @@ int main(int argc, char** argv) {
     memcpy(discoveryMsg + 10 + hostName.length() + 1, userName.c_str(), 
         userName.length());
 
-    for(int i = 0; i < discoveryMsgLen; i++)
-    {
-        dprint("%c", discoveryMsg[i]);
-    }
-    dprint("\n", 0);
+    // for(int i = 0; i < discoveryMsgLen; i++)
+    // {
+    //     dprint("%c", discoveryMsg[i]);
+    // }
+    // dprint("\n", 0);
 
     int recvReply = 0;
 
     // Send discovery message
     udpSockFd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
 
-    if(udpSockFd < 0) {
+    if(udpSockFd < 0)
         die("Failed to open socket");
-    }
 
+    // Enable broadcast capability
     broadcastEnable = 1;
     if(setsockopt(udpSockFd, SOL_SOCKET, SO_REUSEPORT & SO_BROADCAST, &broadcastEnable, 
         sizeof(broadcastEnable)) < 0) {
         close(udpSockFd);
         die("Failed to set socket option");
     }
+
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
     serverAddr.sin_port = htons(udpPort);
@@ -138,16 +141,13 @@ int main(int argc, char** argv) {
         die("Failed to bind socket");
     
 
-
-
     pollFd.fd = udpSockFd;
     pollFd.events = POLLIN;
-    int baseTimeout = initTimeout;
+    int baseTimeout = minTimeout;
     timeval start,end;
     int timePassed;
-
-
     int currTimeout = 0;
+
 
     while(!recvReply && currTimeout <= maxTimeout * 1000) {
         
@@ -158,7 +158,7 @@ int main(int argc, char** argv) {
 
             }
             currTimeout=baseTimeout;
-            dprint("YO\n", 0);
+            // dprint("YO\n", 0);
         }
 
 
@@ -167,7 +167,7 @@ int main(int argc, char** argv) {
         gettimeofday(&start, NULL);
         int rc = poll(&pollFd, 1, currTimeout);
         gettimeofday(&end, NULL);
-        timePassed = ((end.tv_sec-start.tv_sec)*1000000 + end.tv_usec-start.tv_usec)/1000;
+        timePassed = ((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec) / 1000;
         currTimeout -= timePassed;
 
         // Timeout event
@@ -248,10 +248,12 @@ void ERROR_HANDLING(char** argv){
     fprintf(stderr, "%s: option requires an argument -- '%s'\n", argv[0], optErr.c_str());
 	exit(1);
 }
+
+
+
 std::string getHostName()
 {
 	char Buffer[256];
-
 	
 	if(-1 == gethostname(Buffer, 255)){
         printf("Unable to resolve host name.");
@@ -264,20 +266,27 @@ std::string getHostName()
 	return temp;
 }
 
+
+
 // Internal syscall errors
 void die(const char *message) {
     perror(message);
     exit(1);
 }
 
+
+
 int getType(uint8_t* message) {
     return ntohs(*((uint16_t*)message + 2));
 }
+
+
 
 void getHostNUserName(uint8_t* message, std::string& hostName, std::string& userName) {
     hostName = (char*)(message + 10);
     userName = (char*)(message + 10 + hostName.length() + 1);
 }
+
 
 
 void dump(std::string msg)
