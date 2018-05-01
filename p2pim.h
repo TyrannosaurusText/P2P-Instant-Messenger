@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <poll.h>
 #include <sys/time.h>
+#include <cctype>
 
 
 
@@ -33,8 +34,10 @@
 
 void ResetCanonicalMode(int fd, struct termios *savedattributes);
 void SetNonCanonicalMode(int fd, struct termios *savedattributes);
-void ERROR_HANDLING(char** argv);
+void optionError(char** argv);
 void die(const char* message);
 int getType(uint8_t* message);
 void getHostNUserName(uint8_t* message, std::string& hostName, std::string& userName);
 std::string getHostName();
+void checkIsNum(char* str);
+void checkPortRange(int portNum);

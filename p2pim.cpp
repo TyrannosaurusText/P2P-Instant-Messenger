@@ -1,4 +1,3 @@
-
 #include "p2pim.h"
 
 
@@ -22,7 +21,7 @@ int maxTimeout = 60000;
 std::string optErr;
 
 
-int udpSockFd, broadcastEnable;
+int udpSockFd, enable = 1;
 struct sockaddr_in serverAddr, clientAddr;
 socklen_t clientAddrLen; 
 struct pollfd pollFd;
@@ -39,63 +38,81 @@ int main(int argc, char** argv) {
         optErr = argv[i];
 
         // Check if option is valid
-        if(optionMap.find(argv[i]) != optionMap.end()) {
+        if(argv[i][0] == '-' && optionMap.find(argv[i]) != optionMap.end()) {
             if(i == argc - 1 || argv[i + 1][0] == '-')
-                    ERROR_HANDLING(argv);
-        }
+                    optionError(argv);
 
-        // Handle options
-		switch(optionMap[argv[i]])
-		{
-			case USERNAME: {
-                optionMap[argv[i]] = 0;
-                userName = argv[i + 1];
-                break;
-            }
-			case UDP_PORT: {
-                optionMap[argv[i]] = 0;
-                // TODO: Should check port number range
-                udpPort = atoi(argv[i + 1]);
-                break;
-            }
-			case TCP_PORT: {
-                optionMap[argv[i]] = 0;
-                // TODO: Should check port number range
-                tcpPort = atoi(argv[i + 1]);
-                break;
-            }
-			case MIN_TIMEOUT: {
-                optionMap[argv[i]] = 0;
-                // TODO: Should validate argument is a number
-                minTimeout = atoi(argv[i + 1]);
-                break;
-            }
-			case MAX_TIMEOUT: {
-                optionMap[argv[i]] = 0;
-                // TODO: Should validate argument is a number
-                maxTimeout = atoi(argv[i + 1]);
-                break;
-            }
-            // TODO:
-			// case HOST: {
-   //              optionMap[argv[i]] = -1;
-   //              minTimeout = atoi(argv[i + 1]);
-   //              break;
-   //          }
-			default: {
-				dprint("default\n",0);
-                ERROR_HANDLING(argv);
+            // Handle options
+    		switch(optionMap[argv[i]])
+    		{
+    			case USERNAME: {
+                    optionMap[argv[i]] = -1;
+                    userName = argv[i + 1];
+                    break;
+                }
+    			case UDP_PORT: {
+                    optionMap[argv[i]] = -1;
+                    // TODO: Should check port number range
+                    checkIsNum(argv[i + 1]);
+                    udpPort = atoi(argv[i + 1]);
+                    checkPortRange(udpPort);
+                    break;
+                }
+    			case TCP_PORT: {
+                    optionMap[argv[i]] = -1;
+                    // TODO: Should check port number range
+                    checkIsNum(argv[i + 1]);
+                    tcpPort = atoi(argv[i + 1]);
+                    checkPortRange(tcpPort);
+
+                    if(udpPort == tcpPort) {
+                        fprintf(stderr, "Port conflicts!\n");
+                        exit(1);
+                    }
+
+                    break;
+                }
+    			case MIN_TIMEOUT: {
+                    optionMap[argv[i]] = -1;
+                    // TODO: Should validate argument is a number
+                    checkIsNum(argv[i + 1]);
+                    minTimeout = atoi(argv[i + 1]);
+                    break;
+                }
+    			case MAX_TIMEOUT: {
+                    optionMap[argv[i]] = -1;
+                    // TODO: Should validate argument is a number
+                    checkIsNum(argv[i + 1]);
+                    maxTimeout = atoi(argv[i + 1]);
+
+                    if(maxTimeout < minTimeout) {
+                        fprintf(stderr, "Get better with your math!\n");
+                        exit(1);
+                    }
+
+                    break;
+                }
+                // TODO:
+    			// case HOST: {
+       //              optionMap[argv[i]] = -1;
+       //              minTimeout = atoi(argv[i + 1]);
+       //              break;
+       //          }
+    			default: {
+    				dprint("default\n",0);
+                    optionError(argv);
+                }
             }
 		}
 	}
 
-    // dprint("Username = %s\n", userName.c_str());
-    // // TODO: Hostname = sp4.cs.ucdavis.edu
-    // dprint("Hostname = %s\n", hostName.c_str());
-    // dprint("UDP Port = %d\n", udpPort);
-    // dprint("TCP Port = %d\n", tcpPort);
-    // dprint("Mintimeout = %d\n", minTimeout);
-    // dprint("Maxtimeout = %d\n", maxTimeout);
+    dprint("Username = %s\n", userName.c_str());
+    // TODO: Hostname = sp4.cs.ucdavis.edu
+    dprint("Hostname = %s\n", hostName.c_str());
+    dprint("UDP Port = %d\n", udpPort);
+    dprint("TCP Port = %d\n", tcpPort);
+    dprint("Mintimeout = %d\n", minTimeout);
+    dprint("Maxtimeout = %d\n", maxTimeout);
 
 
     // Construct discovery message
@@ -126,11 +143,17 @@ int main(int argc, char** argv) {
         die("Failed to open socket");
 
     // Enable broadcast capability
-    broadcastEnable = 1;
-    if(setsockopt(udpSockFd, SOL_SOCKET, SO_REUSEPORT & SO_BROADCAST, &broadcastEnable, 
-        sizeof(broadcastEnable)) < 0) {
+    enable = 1;
+    if(setsockopt(udpSockFd, SOL_SOCKET, SO_BROADCAST, &enable, 
+        sizeof(enable)) < 0) {
         close(udpSockFd);
-        die("Failed to set socket option");
+        die("Failed to set socket option broadcast");
+    }
+
+    if(setsockopt(udpSockFd, SOL_SOCKET, SO_REUSEPORT, &enable, 
+        sizeof(enable)) < 0) {
+        close(udpSockFd);
+        die("Failed to set socket option reuse address");
     }
 
     serverAddr.sin_family = AF_INET;
@@ -244,7 +267,7 @@ int main(int argc, char** argv) {
 
 
 
-void ERROR_HANDLING(char** argv){
+void optionError(char** argv){
     fprintf(stderr, "%s: option requires an argument -- '%s'\n", argv[0], optErr.c_str());
 	exit(1);
 }
@@ -296,4 +319,24 @@ void dump(std::string msg)
         dprint("%d %c \n", msg[i], msg[i]);
     }
     dprint("\n", 0);
+}
+
+
+
+void checkIsNum(char* str) {
+    for(int i = 0; i < strlen(str); i++) {
+        if(!isdigit(str[i])) {
+            fprintf(stderr, "Input %s is not a number!\n", str);
+            exit(1);
+        }
+    }
+}
+
+
+
+void checkPortRange(int portNum) {
+    if(1 > portNum || 65535 < portNum) {
+        fprintf(stderr, "Invalid port \"%d\", must be in range [1 65,535]\n", portNum);
+        exit(1);
+    }
 }
