@@ -30,11 +30,11 @@ struct pollfd pollFd;
 
 int main(int argc, char** argv) {
     // Get default hostname
-    hostName = std::string(getHostName());
+    hostName = getHostName();
 
     // Iterate through all options
-	for(int i = 1; i < argc; i++){
-		// dprint("val: %s\n", argv[i]);
+    for(int i = 1; i < argc; i++){
+        // dprint("val: %s\n", argv[i]);
         optErr = argv[i];
 
         // Check if option is valid
@@ -43,14 +43,14 @@ int main(int argc, char** argv) {
                     optionError(argv);
 
             // Handle options
-    		switch(optionMap[argv[i]])
-    		{
-    			case USERNAME: {
+            switch(optionMap[argv[i]])
+            {
+                case USERNAME: {
                     optionMap[argv[i]] = -1;
                     userName = argv[i + 1];
                     break;
                 }
-    			case UDP_PORT: {
+                case UDP_PORT: {
                     optionMap[argv[i]] = -1;
                     // TODO: Should check port number range
                     checkIsNum(argv[i + 1]);
@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
                     checkPortRange(udpPort);
                     break;
                 }
-    			case TCP_PORT: {
+                case TCP_PORT: {
                     optionMap[argv[i]] = -1;
                     // TODO: Should check port number range
                     checkIsNum(argv[i + 1]);
@@ -72,14 +72,14 @@ int main(int argc, char** argv) {
 
                     break;
                 }
-    			case MIN_TIMEOUT: {
+                case MIN_TIMEOUT: {
                     optionMap[argv[i]] = -1;
                     // TODO: Should validate argument is a number
                     checkIsNum(argv[i + 1]);
                     minTimeout = atoi(argv[i + 1]);
                     break;
                 }
-    			case MAX_TIMEOUT: {
+                case MAX_TIMEOUT: {
                     optionMap[argv[i]] = -1;
                     // TODO: Should validate argument is a number
                     checkIsNum(argv[i + 1]);
@@ -93,18 +93,18 @@ int main(int argc, char** argv) {
                     break;
                 }
                 // TODO:
-    			// case HOST: {
+                // case HOST: {
        //              optionMap[argv[i]] = -1;
        //              minTimeout = atoi(argv[i + 1]);
        //              break;
        //          }
-    			default: {
-    				dprint("default\n",0);
+                default: {
+                    dprint("default\n",0);
                     optionError(argv);
                 }
             }
-		}
-	}
+        }
+    }
 
     dprint("Username = %s\n", userName.c_str());
     // TODO: Hostname = sp4.cs.ucdavis.edu
@@ -231,14 +231,14 @@ int main(int argc, char** argv) {
 
     *((uint16_t*)closingMsg + 2) = htons(3);  
 
-	if(sendto(udpSockFd, closingMsg, discoveryMsgLen, 0, 
+    if(sendto(udpSockFd, closingMsg, discoveryMsgLen, 0, 
         (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
         die("Failed to send discovery message");
     }
 
     dprint("Bye...\n", 0);
 
-	struct termios SavedTermAttributes;
+    struct termios SavedTermAttributes;
     char RXChar;
     
    /*  SetNonCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
@@ -261,7 +261,7 @@ int main(int argc, char** argv) {
     ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); */
 
 
-	
+    
     return 0;
 }
 
@@ -269,24 +269,23 @@ int main(int argc, char** argv) {
 
 void optionError(char** argv){
     fprintf(stderr, "%s: option requires an argument -- '%s'\n", argv[0], optErr.c_str());
-	exit(1);
+    exit(1);
 }
 
 
 
 std::string getHostName()
 {
-	char Buffer[256];
-	
-	if(-1 == gethostname(Buffer, 255)){
-        printf("Unable to resolve host name.");
-		exit(-1);
+    char buffer[256];
+    
+    if(-1 == gethostname(buffer, 255)){
+        fprintf(stderr, "Unable to resolve host name.");
+        exit(-1);
     }
 
-    struct hostent *LocalHostEntry = gethostbyname(Buffer);
-	strcpy(Buffer, LocalHostEntry->h_name);
-	std::string temp(Buffer);
-	return temp;
+    struct hostent* localHostEntry = gethostbyname(buffer);
+    strcpy(buffer, localHostEntry->h_name);
+    return std::string(buffer);
 }
 
 
@@ -314,7 +313,7 @@ void getHostNUserName(uint8_t* message, std::string& hostName, std::string& user
 
 void dump(std::string msg)
 {
-	for(int i = 0; i < msg.length(); i++)
+    for(int i = 0; i < msg.length(); i++)
     {
         dprint("%d %c \n", msg[i], msg[i]);
     }
