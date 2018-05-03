@@ -2,7 +2,8 @@
 
 
 #define MAX_UDP_MSG_LEN (10 + 64 + 32 + 2)
-
+#define udpFDPOLL 0
+#define terminalFDPOLL 1
 
 enum Option {USERNAME, UDP_PORT, TCP_PORT, MIN_TIMEOUT, MAX_TIMEOUT, HOST};
 
@@ -40,12 +41,15 @@ struct pollfd pollFd[2];
 
 
 
+
 int main(int argc, char** argv) {
     // Setup signal handler
     if(signal(SIGINT, SIGINT_handler) == SIG_ERR)
         die("Failed to catch signal");
 
     parseOptions(argc, argv);
+    initUDPMsg();
+    setupSocket();
 
     // dprint("Username = %s\n", userName.c_str());
     // // TODO: Hostname = sp4.cs.ucdavis.edu
@@ -55,8 +59,6 @@ int main(int argc, char** argv) {
     // dprint("Mintimeout = %d\n", minTimeout);
     // dprint("Maxtimeout = %d\n", maxTimeout);
 
-    initUDPMsg();
-    setupSocket();
 
     pollFd[0].fd = udpSockFd;
     pollFd[0].events = POLLIN;
@@ -83,7 +85,9 @@ int main(int argc, char** argv) {
             dprint("Sending discovery\n", 0);
         }
 
+
         // Wait for reply message
+    
         gettimeofday(&start, NULL);
         int rc = poll(pollFd, 1, currTimeout);
         gettimeofday(&end, NULL);
@@ -101,18 +105,16 @@ int main(int argc, char** argv) {
                 baseTimeout *= 2;
                 dprint("%d\n", currTimeout);
             }
-
         }
         else if(rc > 0) {
             std::string newHostName, newUserName;
 
             dprint("RECV\n", 0);
 
-            int recvLen;
-
             // Reply message
             uint8_t incomingMsg[MAX_UDP_MSG_LEN];
             clientAddrLen = sizeof(clientAddr);
+            int recvLen;
 
             // UDP packet
             if(pollFd[0].revents == POLLIN) {
@@ -127,7 +129,6 @@ int main(int argc, char** argv) {
                     {
                         dprint("%c", incomingMsg[i]);
                     }
-
 
                     switch (type) {
                         case DISCOVERY: {
@@ -178,26 +179,89 @@ int main(int argc, char** argv) {
                             break;
                         }
                     }
-                    // getHostNUserName(incomingMsg, newHostName, newUserName);
-                    // dprint("%s %s\n", newHostName.c_str(), newUserName.c_str());
-                    // dprint("%d %d\n", clientAddr.sin_addr.s_addr, clientAddr.sin_port);
                 }
             }
 
             // TCP packet
-            if(pollFd[1].revents == POLLIN) {
+            // if(pollFd[1].revents == POLLIN) {
 
-            }
+            // }
         }
         else
             dprint("ERROR\n", 0);
     }
 
+
+    struct termios SavedTermAttributes;
+    char* RX[4];
+    std::string buffer = "";
+	pollFd[terminalFDPOLL].fd = STDIN_FILENO;
+	pollFd[terminalFDPOLL].events = POLLIN;
+	std::string message = "";
+	SetNonCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
+    int bytesRead, retpoll;
+	printf(">");
+	fflush(STDIN_FILENO);
+    while(1){
+		retpoll = poll(pollFd, 4, 1000); // to edit
+		//dprint("%d\n",retpoll);
+		if(retpoll == 0) {
+			//dprint("%d", buffer.length());
+			
+		}
+		if(pollFd[terminalFDPOLL].events & POLLIN){
+			int bytesRead = read(STDIN_FILENO, &RX, 4);
+			if (bytesRead < 2)
+			buffer.append((const char*)RX);
+			//dprint("buffer len: %d\n", buffer.length());
+			
+			//dprint("buffer: %c\n", buffer[0]);
+			if(bytesRead == 1){
+				//printf("%c",buffer[0]);
+				fflush(STDIN_FILENO);
+				
+				if(buffer[0] == '\n' ){ //send message
+					printf("\r%s>%s\n",userName.c_str(), message.c_str());
+					//TODO: Actually proccess message
+					message.clear();
+				}
+				else
+				if(buffer[0] == 0x7F ){ //delete char
+					if(message.length() > 0){
+						message.erase(message.length()-1);
+					}
+				}
+				else if(message.length() < 192){
+					message += buffer[0];
+				}
+			}
+			printf("\r\b\b\n");
+			printf(">%s ", message.c_str(), message.length());
+			
+			printf("\033[0D"); //mv cursor
+			fflush(STDIN_FILENO);
+			buffer.clear();
+		}
+		
+		
+		
+    }
+    
+    ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); 
+
+
+    
     return 0;
 }
 
 
-
+/*
+printf("\033[XA"); // Move up X lines;
+printf("\033[XB"); // Move down X lines;
+printf("\033[XC"); // Move right X column;
+printf("\033[XD"); // Move left X column;
+printf("\033[2J"); // Clear screen
+*/
 void optionError(char** argv){
     fprintf(stderr, "%s: option requires an argument -- '%s'\n", argv[0], optErr.c_str());
     exit(1);
@@ -270,7 +334,6 @@ void checkIsNum(char* str) {
 }
 
 
-
 void checkPortRange(int portNum) {
     if(1 > portNum || 65535 < portNum) {
         fprintf(stderr, "Invalid port \"%d\", must be in range [1 65,535]\n", portNum);
@@ -278,7 +341,9 @@ void checkPortRange(int portNum) {
     }
 }
 
-
+void ResetCanonicalMode(int fd, struct termios *savedattributes){
+    tcsetattr(fd, TCSANOW, savedattributes);
+}
 
 void sendUDPMessage(int type) {
     *((uint16_t*)udpMsg + 2) = htons(type);  
@@ -302,6 +367,28 @@ void sendUDPMessage(int type) {
     }
 
 }
+
+void SetNonCanonicalMode(int fd, struct termios *savedattributes){
+    struct termios TermAttributes;
+    char *name;
+    
+    // Make sure stdin is a terminal. 
+    if(!isatty(fd)){
+        fprintf (stderr, "Not a terminal.\n");
+        exit(0);
+    }
+    
+    // Save the terminal attributes so we can restore them later. 
+    tcgetattr(fd, savedattributes);
+    
+    // Set the funny terminal modes. 
+    tcgetattr (fd, &TermAttributes);
+    TermAttributes.c_lflag &= ~(ICANON | ECHO); // Clear ICANON and ECHO. 
+    TermAttributes.c_cc[VMIN] = 1;
+    TermAttributes.c_cc[VTIME] = 0;
+    tcsetattr(fd, TCSAFLUSH, &TermAttributes);
+}
+
 
 
 
