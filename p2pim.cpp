@@ -2,7 +2,8 @@
 
 
 #define MAX_REPLY_MSG_LEN (10 + 64 + 32 + 2)
-
+#define udpFDPOLL 0
+#define terminalFDPOLL 1
 
 enum Option {USERNAME, UDP_PORT, TCP_PORT, MIN_TIMEOUT, MAX_TIMEOUT, HOST};
 
@@ -11,6 +12,7 @@ static std::unordered_map<std::string, int> optionMap {
     {"-dt", MIN_TIMEOUT}, {"dm", MAX_TIMEOUT}, {"pp", HOST}
 };
 
+std::unordered_map<std::string, val> TCPconnections;
 std::string userName = getenv("USER");
 std::string hostName;
 int udpPort = 50550;
@@ -24,12 +26,15 @@ std::string optErr;
 int udpSockFd, enable = 1;
 struct sockaddr_in serverAddr, clientAddr;
 socklen_t clientAddrLen; 
+struct pollfd* polls;
 struct pollfd pollFd;
+struct pollfd terminalPollfd;
 
 
 
 int main(int argc, char** argv) {
     // Get default hostname
+	polls = new pollfd[65537]; // 65535 ports + stdin
     hostName = getHostName();
 
     // Iterate through all options
@@ -172,7 +177,7 @@ int main(int argc, char** argv) {
     int currTimeout = 0;
 
 
-    while(!recvReply && currTimeout <= maxTimeout * 1000) {
+/*     while(!recvReply && currTimeout <= maxTimeout * 1000) {
         
         if(currTimeout <= 0) {
             if(sendto(udpSockFd, discoveryMsg, discoveryMsgLen, 0, 
@@ -236,37 +241,81 @@ int main(int argc, char** argv) {
         die("Failed to send discovery message");
     }
 
-    dprint("Bye...\n", 0);
+    dprint("Bye...\n", 0); */
 
     struct termios SavedTermAttributes;
-    char RXChar;
-    
-   /*  SetNonCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
-    
+    char* RX[4];
+    std::string buffer = "";
+    terminalPollfd.fd = STDIN_FILENO;
+    terminalPollfd.events = POLLIN;
+	polls[udpFDPOLL].fd = udpSockFd;
+	polls[udpFDPOLL].fd = POLLIN;
+	polls[terminalFDPOLL].fd = STDIN_FILENO;
+	polls[terminalFDPOLL].events = POLLIN;
+	std::string message = "";
+	SetNonCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
+    int bytesRead, retpoll;
+	printf(">");
+	fflush(STDIN_FILENO);
     while(1){
-        read(STDIN_FILENO, &RXChar, 1);
-        if(0x04 == RXChar){ // C-d
-            break;
-        }
-        else{
-            if(isprint(RXChar)){
-                printf("RX: '%c' 0x%02X\n",RXChar, RXChar);   
-            }
-            else{
-                printf("RX: ' ' 0x%02X\n",RXChar);
-            }
-        }
+		retpoll = poll(polls, 4, 1000); // to edit
+		//dprint("%d\n",retpoll);
+		if(retpoll == 0) {
+			//dprint("%d", buffer.length());
+			
+		}
+		if(polls[terminalFDPOLL].events & POLLIN){
+			int bytesRead = read(STDIN_FILENO, &RX, 4);
+			if (bytesRead < 2)
+			buffer.append((const char*)RX);
+			//dprint("buffer len: %d\n", buffer.length());
+			
+			//dprint("buffer: %c\n", buffer[0]);
+			if(bytesRead == 1){
+				//printf("%c",buffer[0]);
+				fflush(STDIN_FILENO);
+				
+				if(buffer[0] == '\n' ){ //send message
+					printf("\r%s>%s\n",userName.c_str(), message.c_str());
+					//TODO: Actually proccess message
+					message.clear();
+				}
+				else
+				if(buffer[0] == 0x7F ){ //delete char
+					if(message.length() > 0){
+						message.erase(message.length()-1);
+					}
+				}
+				else if(message.length() < 192){
+					message += buffer[0];
+				}
+			}
+			printf("\r\b\b\n");
+			printf(">%s ", message.c_str(), message.length());
+			
+			printf("\033[0D"); //mv cursor
+			fflush(STDIN_FILENO);
+			buffer.clear();
+		}
+		
+		
+		
     }
     
-    ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); */
+    ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); 
 
 
     
     return 0;
 }
 
-
-
+/*
+printf("\033[XA"); // Move up X lines;
+printf("\033[XB"); // Move down X lines;
+printf("\033[XC"); // Move right X column;
+printf("\033[XD"); // Move left X column;
+printf("\033[2J"); // Clear screen
+*/
 void optionError(char** argv){
     fprintf(stderr, "%s: option requires an argument -- '%s'\n", argv[0], optErr.c_str());
     exit(1);
@@ -329,6 +378,30 @@ void checkIsNum(char* str) {
             exit(1);
         }
     }
+}
+void ResetCanonicalMode(int fd, struct termios *savedattributes){
+    tcsetattr(fd, TCSANOW, savedattributes);
+}
+
+void SetNonCanonicalMode(int fd, struct termios *savedattributes){
+    struct termios TermAttributes;
+    char *name;
+    
+    // Make sure stdin is a terminal. 
+    if(!isatty(fd)){
+        fprintf (stderr, "Not a terminal.\n");
+        exit(0);
+    }
+    
+    // Save the terminal attributes so we can restore them later. 
+    tcgetattr(fd, savedattributes);
+    
+    // Set the funny terminal modes. 
+    tcgetattr (fd, &TermAttributes);
+    TermAttributes.c_lflag &= ~(ICANON | ECHO); // Clear ICANON and ECHO. 
+    TermAttributes.c_cc[VMIN] = 1;
+    TermAttributes.c_cc[VTIME] = 0;
+    tcsetattr(fd, TCSAFLUSH, &TermAttributes);
 }
 
 
