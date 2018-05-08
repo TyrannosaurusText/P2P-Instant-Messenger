@@ -25,6 +25,11 @@ struct Client {
     int block = 0;
 };
 
+struct Host {
+    std::string hostName;
+    int portNum;
+};
+
 
 
 std::string userName = getenv("USER");
@@ -48,6 +53,8 @@ struct sockaddr_in udpServerAddr, udpClientAddr, tcpServerAddr, tcpClientAddr;
 socklen_t udpClientAddrLen, tcpClientAddrLen; 
 // struct pollfd pollFd[2];
 std::vector<struct pollfd> pollFd(3);
+
+std::vector<struct Host> unicastHosts;
 
 int away = 0;
 
@@ -88,7 +95,37 @@ int main(int argc, char** argv) {
     while(baseTimeout <= maxTimeout * 1000) {
         
         if(currTimeout <= 0) {
-            if(clientMap.empty()) {
+            if(!unicastHosts.empty()) {
+                dprint("size is %d\n", unicastHosts.size());
+                for(auto h : unicastHosts) {
+                    // Resolve dns
+                    struct hostent* remoteHostEntry = gethostbyname(h.hostName.c_str());
+                    if(!remoteHostEntry) {
+                        die("Failed to resolve host");
+                    }
+
+                    struct in_addr remoteAddr;
+                    // char buf[256];
+
+                    memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
+                    // inet_ntop(AF_INET, &remoteAddr, buf, INET_ADDRSTRLEN);
+
+                    // struct sockaddr_in addr2Send;
+                    // addr2Send.sin_addr = htonl(remoteAddr.sin_addr);
+                    // addr2Send.sin_port = htons(h.portNum);
+                    // addr2Send.sa_family = AF_INET;
+                    udpServerAddr.sin_addr = remoteAddr;
+                    udpServerAddr.sin_port = htons(h.portNum);
+                    // addr2Send.sa_family = AF_INET;
+
+                    sendUDPMessage(DISCOVERY);
+                }
+
+                unicastHosts.clear();
+                currTimeout = baseTimeout;
+            }
+            else if(unicastHosts.empty() && clientMap.empty()) {
+                udpServerAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
                 sendUDPMessage(DISCOVERY);
                 currTimeout = baseTimeout;
             }
@@ -504,7 +541,11 @@ void parseOptions(int argc, char** argv) {
                     // TODO:
                     if((remoteAddr.s_addr & tmpMask.s_addr) != (tmpIPAddr.s_addr & tmpMask.s_addr)) {
                         // dprint("Same subnet\n", 0);
-                        ;
+                        struct Host newUnicastHost;
+                        newUnicastHost.hostName = tmpHostName;
+                        newUnicastHost.portNum = tmpPortNum;
+
+                        unicastHosts.push_back(newUnicastHost);
                     } 
 
                     // dprint("%s", inet_ntoa(remoteHostEntry->h_addr));
@@ -628,8 +669,6 @@ void setupSocket() {
 
     if(-1 == bind(tcpSockFd, (struct sockaddr*)&tcpServerAddr, sizeof(tcpServerAddr)))
         die("Failed to bind tcp socket");
-
-    udpServerAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
 
     listen(tcpSockFd, 5);
 }
@@ -822,9 +861,11 @@ void checkConnections()
                         continue;
     				}
     				case REQUEST_USER_LIST: {
+
     					break;
     				}
     				case REPLY_USER_LIST: {
+
     					break;
     				}
     				case DATA: {
