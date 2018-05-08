@@ -21,8 +21,7 @@ struct Client {
     int udpPort;
     int tcpPort;
     sockaddr_in tcpClientAddr;
-    socklen_t tcpClientAddrLen;
-    int tcpSockFd;
+    int tcpSockFd = -1;
     int block = 0;
 };
 
@@ -42,6 +41,7 @@ struct in_addr tmpIPAddr, tmpMask;
 uint8_t outgoingUDPMsg[MAX_UDP_MSG_LEN];
 int outgoingUDPMsgLen;
 std::unordered_map<std::string, struct Client> clientMap;
+std::unordered_map<int, std::string> tcpConnMap;
 
 int udpSockFd, tcpSockFd, enable = 1;
 struct sockaddr_in udpServerAddr, udpClientAddr, tcpServerAddr, tcpClientAddr;
@@ -87,22 +87,27 @@ int main(int argc, char** argv) {
     // When no host is available and maxTimeout not exceeded, discovery hosts
     while(baseTimeout <= maxTimeout * 1000) {
         
-        if(currTimeout <= 0 && clientMap.empty()) {
-            sendUDPMessage(DISCOVERY);
-            currTimeout = baseTimeout;
+        if(currTimeout <= 0) {
+            if(clientMap.empty()) {
+                sendUDPMessage(DISCOVERY);
+                currTimeout = baseTimeout;
+            }
+            else
+                currTimeout = minTimeout;
         }
 
 
         // Wait for reply message
         gettimeofday(&start, NULL);
         //TODO: there is a potential bug, where currTimeout is set to 0 and poll returns immediately
-        int rc = poll(pollFd.data() + udpFDPOLL, 2, currTimeout);
+        int rc = poll(pollFd.data() + udpFDPOLL, pollFd.size() - 1, currTimeout);
         gettimeofday(&end, NULL);
         timePassed = ((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec) / 1000;
         currTimeout -= timePassed;
 
         // Timeout event
         if(0 == rc) {
+            dprint("Next iteration at %d\n", currTimeout);
             if(clientMap.empty()) {
                 dprint("TIMEOUT: ", 0);
 
@@ -112,6 +117,8 @@ int main(int argc, char** argv) {
             }
         }
         else if(rc > 0) {
+            // dprint("Something is available\n", 0);
+
             std::string newClientName, newUserName;
 
             checkUDPPort(baseTimeout, currTimeout);
@@ -359,7 +366,27 @@ void SIGINT_handler(int signum) {
 
         // if(input[0] == 'y'){
             // Shutdown socket before exiting
+
+            // Close all tcp connections
+            for(auto it : clientMap) {
+                if(it.second.tcpSockFd != -1) {
+                    
+                    uint8_t outgoingTCPMsg[6];
+                    memcpy(outgoingTCPMsg, "P2PI", 4);
+                    *((uint16_t*)outgoingTCPMsg + 2) = htons(DISCONTINUE_COMM);
+
+                    if(write(it.second.tcpSockFd, outgoingTCPMsg, 6) < 0) {
+                        die("Failed to send TCP message");
+                    }
+
+                    close(it.second.tcpSockFd);
+                }
+            }
+
             sendUDPMessage(CLOSING);
+            
+
+            shutdown(tcpSockFd, 0);
             shutdown(udpSockFd, 0);
             exit(0);
         // }
@@ -462,6 +489,8 @@ void parseOptions(int argc, char** argv) {
                     // dprint("%s\n", buf);
                     // dprint("%lu\n", remoteAddr.s_addr & tmpMask.s_addr);
                     // dprint("%lu\n", tmpIPAddr.s_addr & tmpMask.s_addr);
+
+                    // TODO:
                     if((remoteAddr.s_addr & tmpMask.s_addr) != (tmpIPAddr.s_addr & tmpMask.s_addr)) {
                         // dprint("Same subnet\n", 0);
                         ;
@@ -522,7 +551,6 @@ void connectToClient(std::string clientName) {
 
         dprint("CONNECTED TO NEW HOST\n", 0);
 
-
         // Send ESTABLISH COMMUNICATION MSG
         uint8_t ECM[39];
         int ECMLen = 4 + 2 + userName.length() + 1;
@@ -536,6 +564,14 @@ void connectToClient(std::string clientName) {
             die("Failed to send ESTABLISH COMM message.");
         }
 
+        tcpConnMap[newConn] = clientName;
+
+        // Push fd to pollfd vector
+        struct pollfd newPollFd;
+        newPollFd.fd = newConn;
+        newPollFd.events = POLLIN;
+        pollFd.push_back(newPollFd);
+
         // Record the newly connected tcp socket
         clientMap.find(clientName)->second.tcpSockFd = newConn;
     }
@@ -544,7 +580,7 @@ void connectToClient(std::string clientName) {
 std::unordered_map<std::string, struct Client>::iterator findClient(uint8_t* incomingUDPMsg) {
     struct Client newClient;
     getClientNUserName(incomingUDPMsg, newClient.hostName, newClient.userName);
-    getPorts(incomingUDPMsg, newClient.udpPort, newClient.tcpPort);
+    // getPorts(incomingUDPMsg, newClient.udpPort, newClient.tcpPort);
     
     return clientMap.find(newClient.userName);
 }
@@ -619,7 +655,7 @@ void checkTCPPort(std::string newClientName) {
             if(clientMap.find(newClientName) == clientMap.end()) {
                 dprint("WHO?\n", 0);
             }
-            
+
 			if(away || clientMap.find(newClientName)->second.block) {
 				// Send user unavailable message
 				*((uint16_t*)ECM + 2) = htons(USER_UNAVALIBLE);
@@ -633,9 +669,12 @@ void checkTCPPort(std::string newClientName) {
 			}
 			else {
 				// Send accept comm message
+                dprint("GOOD\n", 0);
 				*((uint16_t*)ECM + 2) = htons(ACCEPT_COMM);
 
 				clientMap.find(newClientName)->second.tcpSockFd = newConn;
+
+                tcpConnMap[newConn] = newClientName;
 
 				// Push fd to pollfd vector
 				struct pollfd newPollFd;
@@ -721,8 +760,13 @@ void checkUDPPort(int baseTimeout, int &currTimeout) {
                     // Remove host from map
                     std::unordered_map<std::string, struct Client>::iterator it = findClient(incomingUDPMsg);
 
-                    if(it != clientMap.end())
-                        clientMap.erase(it);
+                    // if(it != clientMap.end()) {
+                    //     if(it->second.tcpSockFd != -1) {
+                    //         dprint("CLOSING connection\n", 0);
+                    //         close(it->second.tcpSockFd);
+                    //     }
+                    //     clientMap.erase(it);
+                    // }
 
                     // If no more host is available, go back to discovery
                     if(clientMap.empty()) {
@@ -740,44 +784,58 @@ void checkUDPPort(int baseTimeout, int &currTimeout) {
 
 void checkConnections()
 {
-	for(int i = tcpFDPOLL + 1; i < pollFd.size(); i++) {
-	if(pollFd[i].revents == POLLIN) {
-		uint8_t incomingTCPMsg[518];
-		int recvLen = read(pollFd[i].fd, incomingTCPMsg, 518);
+	for(auto it = pollFd.begin() + 3; it != pollFd.end();) {
+        // dprint("Checking %d at %d\n", i, pollFd[i].fd);
+    	if(it->revents == POLLIN) {
+            dprint("%d has something, size %d\n", it->fd, pollFd.size());
+    		uint8_t incomingTCPMsg[518];
+    		int recvLen = read(it->fd, incomingTCPMsg, 518);
 
-		if(recvLen > 0) {
-			int type = getType(incomingTCPMsg);
+    		if(recvLen > 0) {
+    			int type = getType(incomingTCPMsg);
 
-			dprint("RECV: %d ", type);
-			// dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
-			// dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
+    			dprint("RECV: %d\n", type);
+    			// dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
+    			// dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
 
-			switch(type) {
-				case ACCEPT_COMM: {
-					break;
-				}
-				case USER_UNAVALIBLE: {
-					// Close connection as well
-					close(pollFd[i].fd);
-					pollFd.erase(pollFd.begin() + i);
-					break;
-				}
-				case REQUEST_USER_LIST: {
-					break;
-				}
-				case REPLY_USER_LIST: {
-					break;
-				}
-				case DATA: {
-					break;
-				}
-				case DISCONTINE_COMM: {
-					break;
-				}
-			}
-		}
-	}
-}
+    			switch(type) {
+    				case ACCEPT_COMM: {
+                        dprint("Connected to user %s\n", tcpConnMap.find(it->fd)->second.c_str());
+    					break;
+    				}
+    				case USER_UNAVALIBLE: {
+    					// Close connection as well
+                        dprint("The user %s is currently unavailable\n", tcpConnMap.find(it->fd)->second.c_str());
+    					close(it->fd);
+    					it = pollFd.erase(it);
+                        continue;
+    				}
+    				case REQUEST_USER_LIST: {
+    					break;
+    				}
+    				case REPLY_USER_LIST: {
+    					break;
+    				}
+    				case DATA: {
+    					break;
+    				}
+    				case DISCONTINUE_COMM: {
+                        dprint("User %s wants to discontinue communication.\n", tcpConnMap.find(it->fd)->second.c_str());
+                        clientMap.find(tcpConnMap.find(it->fd)->second)->second.tcpSockFd = -1;
+                        tcpConnMap.erase(tcpConnMap.find(it->fd));
+                        close(it->fd);
+                        it = pollFd.erase(it);
+                        continue;
+    				}
+    			}
+
+                
+    		}
+    	}
+        
+        
+        it++;
+    }
 }
 
 

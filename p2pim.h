@@ -44,7 +44,7 @@
 #define REQUEST_USER_LIST 7
 #define REPLY_USER_LIST 8
 #define DATA 9
-#define DISCONTINE_COMM 10
+#define DISCONTINUE_COMM 10
 
 void ResetCanonicalMode(int fd, struct termios *savedattributes);
 void SetNonCanonicalMode(int fd, struct termios *savedattributes);
