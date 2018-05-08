@@ -23,7 +23,7 @@
 #include <signal.h>
 #include <ifaddrs.h>
 #include <vector>
-
+#include <sys/ioctl.h>
 
 #define DEBUG 1
 

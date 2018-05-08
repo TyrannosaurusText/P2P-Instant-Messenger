@@ -2,10 +2,8 @@
 
 
 #define MAX_UDP_MSG_LEN (10 + 254 + 32 + 2)
-
 #define terminalFDPOLL 0
 #define udpFDPOLL 1
-#define tcpFDPOLL 2
 
 enum Option {USERNAME, UDP_PORT, TCP_PORT, MIN_TIMEOUT, MAX_TIMEOUT, HOST};
 
@@ -23,7 +21,7 @@ struct Client {
     sockaddr_in tcpClientAddr;
     socklen_t tcpClientAddrLen;
     int tcpSockFd;
-    int block = 0;
+    int block;
 };
 
 
@@ -57,8 +55,8 @@ std::unordered_map<std::string, struct Client>::iterator findClient(uint8_t* inc
 
 int main(int argc, char** argv) {
     // Setup signal handler
-    if(signal(SIGINT, SIGINT_handler) == SIG_ERR)
-        die("Failed to catch signal");
+    //if(signal(SIGINT, SIGINT_handler) == SIG_ERR)
+    //    die("Failed to catch signal");
 
     // findIPNMask();
     parseOptions(argc, argv);
@@ -74,17 +72,17 @@ int main(int argc, char** argv) {
     // dprint("Maxtimeout = %d\n", maxTimeout);
 
 
-    pollFd[udpFDPOLL].fd = udpSockFd;
-    pollFd[udpFDPOLL].events = POLLIN;
-    pollFd[tcpFDPOLL].fd = tcpSockFd;
-    pollFd[tcpFDPOLL].events = POLLIN;
+    pollFd[1].fd = udpSockFd;
+    pollFd[1].events = POLLIN;
+    pollFd[2].fd = tcpSockFd;
+    pollFd[2].events = POLLIN;
     int baseTimeout = minTimeout;
     timeval start,end;
     int timePassed;
     int currTimeout = 0;
 
 
-    // When no host is available and maxTimeout not exceeded, discovery hosts
+    /* // When no host is available and maxTimeout not exceeded, discovery hosts
     while(baseTimeout <= maxTimeout * 1000) {
         
         if(currTimeout <= 0 && clientMap.empty()) {
@@ -92,11 +90,10 @@ int main(int argc, char** argv) {
             currTimeout = baseTimeout;
         }
 
-
         // Wait for reply message
         gettimeofday(&start, NULL);
         //TODO: there is a potential bug, where currTimeout is set to 0 and poll returns immediately
-        int rc = poll(pollFd.data() + udpFDPOLL, 2, currTimeout);
+        int rc = poll(pollFd.data() + 1, 2, currTimeout);
         gettimeofday(&end, NULL);
         timePassed = ((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec) / 1000;
         currTimeout -= timePassed;
@@ -124,9 +121,9 @@ int main(int argc, char** argv) {
         }
         else
             dprint("ERROR\n", 0);
-    }
+    } */
 
-    /*
+    
     struct termios SavedTermAttributes;
     char* RX[4];
     std::string buffer = "";
@@ -136,6 +133,9 @@ int main(int argc, char** argv) {
 	SetNonCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
     int bytesRead, retpoll;
 	printf(">");
+	struct winsize size;
+	ioctl(STDOUT_FILENO,TIOCGWINSZ,&size);
+	int numcol = size.ws_col;
 	fflush(STDIN_FILENO);
     while(1){
 		retpoll = poll(pollFd.data(), 4, 1000); // to edit
@@ -159,30 +159,37 @@ int main(int argc, char** argv) {
 					printf("\r%s>%s\n",userName.c_str(), message.c_str());
 					//TODO: Actually proccess message
 					message.clear();
+					printf("\n\033[1B");
 				}
 				else if(buffer[0] == 0x7F) { //delete char
 					if(message.length() > 0) {
 						message.erase(message.length()-1);
+						printf("\033[1D  "); //clears current and next char in terminal
+						
 					}
 				}
-				else if(message.length() < 192) {
+				else if(message.length() < 512){
 					message += buffer[0];
+					//eraselines(message.length()/numcol);
 				}
 			}
-			printf("\r\b\b\n");
-			printf(">%s ", message.c_str(), message.length());
 			
-			printf("\033[0D"); //mv cursor
+			if(message.length()+1 > numcol) //simulate loop
+				printf("\b\r%s", message.substr(message.length()-numcol, numcol).c_str());
+			else
+				printf("\b\r>%s", message.c_str());
+		
 			fflush(STDIN_FILENO);
 			buffer.clear();
 		}
     }
     
     ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); 
-    */
+    
 
     return 0;
 }
+
 
 
 /*
@@ -273,7 +280,8 @@ void getPorts(uint8_t* message, int& udpPort, int& tcpPort) {
     tcpPort = ntohs(*((uint16_t*)message + 4));
 }
 
-void dump(std::string msg) {
+void dump(std::string msg)
+{
     for(int i = 0; i < msg.length(); i++)
     {
         dprint("%d %c \n", msg[i], msg[i]);
@@ -297,7 +305,7 @@ void checkPortRange(int portNum) {
     }
 }
 
-void ResetCanonicalMode(int fd, struct termios *savedattributes) {
+void ResetCanonicalMode(int fd, struct termios *savedattributes){
     tcsetattr(fd, TCSANOW, savedattributes);
 }
 
@@ -327,7 +335,7 @@ void sendUDPMessage(int type) {
 
 }
 
-void SetNonCanonicalMode(int fd, struct termios *savedattributes) {
+void SetNonCanonicalMode(int fd, struct termios *savedattributes){
     struct termios TermAttributes;
     char *name;
     
@@ -510,35 +518,24 @@ void addNewClient(uint8_t* incomingUDPMsg) {
 }
 
 void connectToClient(std::string clientName) {
-    std::unordered_map<std::string, struct Client>::iterator it = clientMap.find(clientName);
-    if(it != clientMap.end()) {
-        struct sockaddr_in client2ConnetAddr = it->second.tcpClientAddr;
-        int newConn = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if(0 > connect(newConn, (struct sockaddr *)&client2ConnetAddr, sizeof(client2ConnetAddr)))
-            die("Failed to connect to host.");
+    struct sockaddr_in client2ConnetAddr = clientMap.find(clientName)->second.tcpClientAddr;
+    int newConn = connect(tcpSockFd, (struct sockaddr *)&client2ConnetAddr, sizeof(client2ConnetAddr));
 
-        dprint("%d\n", newConn);
-        // close(tmpTCPSock);
+    // Send ESTABLISH COMMUNICATION MSG
+    uint8_t ECM[39];
+    int ECMLen = 4 + 2 + userName.length() + 1;
 
-        dprint("CONNECTED TO NEW HOST\n", 0);
+    memset(ECM, '0', ECMLen);
+    memcpy(ECM, "P2PI", 4);
+    *((uint16_t*)ECM + 2) = htons(ESTABLISH_COMM);
+    memcpy((uint16_t*)ECM + 3, userName.c_str(), userName.length());
 
-
-        // Send ESTABLISH COMMUNICATION MSG
-        uint8_t ECM[39];
-        int ECMLen = 4 + 2 + userName.length() + 1;
-
-        memset(ECM, 0, ECMLen);
-        memcpy(ECM, "P2PI", 4);
-        *((uint16_t*)ECM + 2) = htons(ESTABLISH_COMM);
-        memcpy((uint16_t*)ECM + 3, userName.c_str(), userName.length());
-
-        if(write(newConn, ECM, ECMLen) < 0) {
-            die("Failed to send ESTABLISH COMM message.");
-        }
-
-        // Record the newly connected tcp socket
-        clientMap.find(clientName)->second.tcpSockFd = newConn;
+    if(write(newConn, ECM, ECMLen) < 0) {
+        die("Failed to send ESTABLISH COMM message.");
     }
+
+    // Record the newly connected tcp socket
+    clientMap.find(clientName)->second.tcpSockFd = newConn;
 }
 
 std::unordered_map<std::string, struct Client>::iterator findClient(uint8_t* incomingUDPMsg) {
@@ -598,14 +595,11 @@ void sendTCPMessage(int type, std::string userName) {
     }
 }
 
-void checkTCPPort(std::string newClientName) {
-	if(pollFd[tcpFDPOLL].revents == POLLIN) {
-        dprint("NEW HOST TRYING TO CONNECT\n", 0);
-
+void checkTCPPort(std::string newClientName){
+	
+	if(pollFd[2].revents == POLLIN) {
 		int newConn = accept(tcpSockFd, (struct sockaddr*)&tcpClientAddr, &tcpClientAddrLen);
 		
-        dprint("NEW HOST CONNECTED at %d\n", newConn);
-
 		uint8_t incomingTCPMsg[518];
 		int recvLen = read(newConn, incomingTCPMsg, 518);
 
@@ -615,18 +609,9 @@ void checkTCPPort(std::string newClientName) {
 			int ECMLen = 6;
 			memcpy(ECM, "P2PI", 4);
 			
-            dprint("New Client Name is %s\n", newClientName.c_str());
-            if(clientMap.find(newClientName) == clientMap.end()) {
-                dprint("WHO?\n", 0);
-            }
-            
 			if(away || clientMap.find(newClientName)->second.block) {
 				// Send user unavailable message
 				*((uint16_t*)ECM + 2) = htons(USER_UNAVALIBLE);
-
-                if(write(newConn, ECM, 6) < 0) {
-                    die("Failed to establish TCP connection.");
-                }
 
 				// Close connection
 				close(newConn);
@@ -642,18 +627,17 @@ void checkTCPPort(std::string newClientName) {
 				newPollFd.fd = newConn;
 				newPollFd.events = POLLIN;
 				pollFd.push_back(newPollFd);
-
-                if(write(newConn, ECM, 6) < 0) {
-                    die("Failed to establish TCP connection.");
-                }
 			}
 
-			
+			if(write(newConn, ECM, 6) < 0) {
+				die("Failed to establish TCP connection.");
+			}
 		}
 	}
 }
 
-void checkUDPPort(int baseTimeout, int &currTimeout) {
+void checkUDPPort(int baseTimeout, int &currTimeout)
+{
      // Reply message
     uint8_t incomingUDPMsg[MAX_UDP_MSG_LEN];
     udpClientAddrLen = sizeof(udpClientAddr);
@@ -661,7 +645,7 @@ void checkUDPPort(int baseTimeout, int &currTimeout) {
     int recvLen;
 
     // UDP packet
-    if(pollFd[udpFDPOLL].revents == POLLIN) {
+    if(pollFd[1].revents == POLLIN) {
         recvLen = recvfrom(udpSockFd, incomingUDPMsg, MAX_UDP_MSG_LEN, 0,
             (struct sockaddr*)&udpClientAddr, &udpClientAddrLen);
 
@@ -686,9 +670,11 @@ void checkUDPPort(int baseTimeout, int &currTimeout) {
                     if(memcmp(incomingUDPMsg + 6, outgoingUDPMsg + 6, outgoingUDPMsgLen - 6)) {
                         // Check if host is already discovered
                         if(findClient(incomingUDPMsg) == clientMap.end()) {
-                            std::string userName_a, hostName_a;
-                            getClientNUserName(incomingUDPMsg, hostName_a, userName_a);
+							
+							std::string userName_a, hostName_a;
+							getClientNUserName(incomingUDPMsg, hostName_a, userName_a);
                             dprint("-----NEW HOST: %s-----\n", userName_a.c_str());
+							
                             
                             addNewClient(incomingUDPMsg);
                         }
@@ -711,8 +697,7 @@ void checkUDPPort(int baseTimeout, int &currTimeout) {
                         addNewClient(incomingUDPMsg);
 
                         // Try to initiate tcp connection with host
-                        dprint("%s\n", clientMap.begin()->first.c_str());
-                        connectToClient(clientMap.begin()->first);
+                        // connectToClient();
                     }
                     break;
                 }
@@ -740,7 +725,7 @@ void checkUDPPort(int baseTimeout, int &currTimeout) {
 
 void checkConnections()
 {
-	for(int i = tcpFDPOLL + 1; i < pollFd.size(); i++) {
+	for(int i = 3; i < pollFd.size(); i++) {
 	if(pollFd[i].revents == POLLIN) {
 		uint8_t incomingTCPMsg[518];
 		int recvLen = read(pollFd[i].fd, incomingTCPMsg, 518);
