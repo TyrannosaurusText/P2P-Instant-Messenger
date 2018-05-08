@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
     int currTimeout = 0;
 
 
-    /* // When no host is available and maxTimeout not exceeded, discovery hosts
+    // When no host is available and maxTimeout not exceeded, discovery hosts
     while(baseTimeout <= maxTimeout * 1000) {
         
         if(currTimeout <= 0 && clientMap.empty()) {
@@ -121,7 +121,7 @@ int main(int argc, char** argv) {
         }
         else
             dprint("ERROR\n", 0);
-    } */
+    }
 
     
     struct termios SavedTermAttributes;
