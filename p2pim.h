@@ -22,7 +22,7 @@
 #include <cctype>
 #include <signal.h>
 #include <ifaddrs.h>
-
+#include <vector>
 
 
 #define DEBUG 1
@@ -56,12 +56,12 @@ void getPorts(uint8_t* message, int& udpPort, int& tcpPort);
 
 
 
-std::string getHostName();
-void checkIsNum(char* str);
+void getHostName();
+void checkIsNum(const char* str);
 void checkPortRange(int portNum);
 void SIGINT_handler(int signum);
 void parseOptions(int argc, char** argv);
 void initUDPMsg();
-void addNewHost(uint8_t* replyMsg);
+void addNewClient(uint8_t* replyMsg);
 void setupSocket();
 void sendUDPMessage(int type);

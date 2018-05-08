@@ -1,7 +1,7 @@
 #include "p2pim.h"
 
 
-#define MAX_UDP_MSG_LEN (10 + 64 + 32 + 2)
+#define MAX_UDP_MSG_LEN (10 + 254 + 32 + 2)
 #define udpFDPOLL 0
 #define terminalFDPOLL 1
 
@@ -9,15 +9,19 @@ enum Option {USERNAME, UDP_PORT, TCP_PORT, MIN_TIMEOUT, MAX_TIMEOUT, HOST};
 
 static std::unordered_map<std::string, int> optionMap {
     {"-u", USERNAME}, {"-up", UDP_PORT}, {"-tp", TCP_PORT}, 
-    {"-dt", MIN_TIMEOUT}, {"dm", MAX_TIMEOUT}, {"pp", HOST}
+    {"-dt", MIN_TIMEOUT}, {"-dm", MAX_TIMEOUT}, {"-pp", HOST}
 };
 
 
-struct Host {
+struct Client {
     std::string userName;
     std::string hostName;
     int udpPort;
     int tcpPort;
+    sockaddr_in tcpClientAddr;
+    socklen_t tcpClientAddrLen;
+    int tcpSockFd;
+    int block;
 };
 
 
@@ -30,18 +34,23 @@ int minTimeout = 5000;
 int maxTimeout = 60000;
 // int destPort = ls
 std::string optErr;
+struct in_addr tmpIPAddr, tmpMask;
+
 
 uint8_t outgoingUDPMsg[MAX_UDP_MSG_LEN];
 int outgoingUDPMsgLen;
-std::unordered_map<std::string, struct Host> hostMap;
+std::unordered_map<std::string, struct Client> clientMap;
 
 int udpSockFd, tcpSockFd, enable = 1;
-struct sockaddr_in udpServerAddr, clientAddr;
-socklen_t clientAddrLen; 
-struct pollfd pollFd[2];
+struct sockaddr_in udpServerAddr, udpClientAddr, tcpServerAddr, tcpClientAddr;
+socklen_t udpClientAddrLen, tcpClientAddrLen; 
+// struct pollfd pollFd[2];
+std::vector<struct pollfd> pollFd(3);
+
+int away = 0;
 
 
-std::unordered_map<std::string, struct Host>::iterator findHost(uint8_t* replyMsg);
+std::unordered_map<std::string, struct Client>::iterator findClient(uint8_t* replyMsg);
 
 
 int main(int argc, char** argv) {
@@ -49,23 +58,24 @@ int main(int argc, char** argv) {
     if(signal(SIGINT, SIGINT_handler) == SIG_ERR)
         die("Failed to catch signal");
 
+    // findIPNMask();
     parseOptions(argc, argv);
     initUDPMsg();
     setupSocket();
 
     // dprint("Username = %s\n", userName.c_str());
-    // // TODO: Hostname = sp4.cs.ucdavis.edu
-    // dprint("Hostname = %s\n", hostName.c_str());
+    // // TODO: Clientname = sp4.cs.ucdavis.edu
+    // dprint("Clientname = %s\n", hostName.c_str());
     // dprint("UDP Port = %d\n", udpPort);
     // dprint("TCP Port = %d\n", tcpPort);
     // dprint("Mintimeout = %d\n", minTimeout);
     // dprint("Maxtimeout = %d\n", maxTimeout);
 
 
-    pollFd[0].fd = udpSockFd;
-    pollFd[0].events = POLLIN;
-    // pollFd[1].fd = tcpSockFd;
-    // pollFd[1].events = POLLIN;
+    pollFd[1].fd = udpSockFd;
+    pollFd[1].events = POLLIN;
+    pollFd[2].fd = tcpSockFd;
+    pollFd[2].events = POLLIN;
     int baseTimeout = minTimeout;
     timeval start,end;
     int timePassed;
@@ -75,7 +85,7 @@ int main(int argc, char** argv) {
     // When no host is available and maxTimeout not exceeded, discovery hosts
     while(baseTimeout <= maxTimeout * 1000) {
         
-        if(currTimeout <= 0 && hostMap.empty()) {
+        if(currTimeout <= 0 && clientMap.empty()) {
             sendUDPMessage(DISCOVERY);
             currTimeout = baseTimeout;
         }
@@ -84,14 +94,14 @@ int main(int argc, char** argv) {
         // Wait for reply message
         gettimeofday(&start, NULL);
         //TODO: there is a potential bug, where currTimeout is set to 0 and poll returns immediately
-        int rc = poll(pollFd, 1, currTimeout);
+        int rc = poll(pollFd.data() + 1, 2, currTimeout);
         gettimeofday(&end, NULL);
         timePassed = ((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec) / 1000;
         currTimeout -= timePassed;
 
         // Timeout event
         if(0 == rc) {
-            if(hostMap.empty()) {
+            if(clientMap.empty()) {
                 dprint("TIMEOUT: ", 0);
 
                 // Double current timeout
@@ -100,24 +110,24 @@ int main(int argc, char** argv) {
             }
         }
         else if(rc > 0) {
-            std::string newHostName, newUserName;
+            std::string newClientName, newUserName;
 
             // Reply message
             uint8_t incomingUDPMsg[MAX_UDP_MSG_LEN];
-            clientAddrLen = sizeof(clientAddr);
-            // clientAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+            udpClientAddrLen = sizeof(udpClientAddr);
+            // udpClientAddr.sin_addr.s_addr = htonl(INADDR_ANY);
             int recvLen;
 
             // UDP packet
-            if(pollFd[0].revents == POLLIN) {
+            if(pollFd[1].revents == POLLIN) {
                 recvLen = recvfrom(udpSockFd, incomingUDPMsg, MAX_UDP_MSG_LEN, 0,
-                    (struct sockaddr*)&clientAddr, &clientAddrLen);
+                    (struct sockaddr*)&udpClientAddr, &udpClientAddrLen);
 
                 if(recvLen > 0) {
                     int type = getType(incomingUDPMsg);
 
                     dprint("RECV: %d ", type);
-                    dprint("SRC - %s : %d ", inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
+                    dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
                     dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
 
                     // for(int i = 0; i < recvLen; i++)
@@ -127,20 +137,49 @@ int main(int argc, char** argv) {
 
                     switch (type) {
                         case DISCOVERY: {
-                            // Add host to hostMap if not self discovery and not in
+                            // Add host to clientMap if not self discovery and not in
                             // map already
 
                             // Check if packet is from another host
                             if(memcmp(incomingUDPMsg + 6, outgoingUDPMsg + 6, outgoingUDPMsgLen - 6)) {
                                 // Check if host is already discovered
-                                if(findHost(incomingUDPMsg) == hostMap.end()) {
+                                if(findClient(incomingUDPMsg) == clientMap.end()) {
                                     dprint("-----NEW HOST-----\n", 0);
-                                    addNewHost(incomingUDPMsg);
+                                    
+                                    // Wait for new tcp connection request
+                                    // int fd = accept(tcpSockFd, (struct sockaddr*)&tcpClientAddr, &tcpClientAddrLen);
+
+                                    // if(fd > 0) {
+                                        // addNewClient(incomingUDPMsg, fd);
+                                        addNewClient(incomingUDPMsg);
+                                    // }
+
                                 }
+
+                                // Should send reply regardless the host is already known
                                 sendUDPMessage(REPLY);
+
+                                // struct Client client2Connect = clientMap[clientAtHost];
+
+                                // Change port to tcp port
+                                // client2Connect.clientAddr.sin_port = htons(tcpPort);
+
+                                // int fd = connect(tcpSockFd, (const struct sockaddr*)client2Connect.clientAddr, sizeof(client2Connect.clientAddr));
+
+                                // if(0 > fd) {
+                                    // die("Failed to connect to host");
+                                // }
+
+                                // clientMap[clientAtHost].tcpSockFd = fd;
+
+                                // Push new connected socket to poll vector
+                                // struct pollfd newPollfd;
+                                // newPollfd.fd = fd;
+                                // newPollfd.events = POLLIN;
+                                // pollFd.push_back(newPollfd);
                                 
                                 // std::string userName_a, hostName_a;
-                                // getHostNUserName(outgoingUDPMsg, hostName_a, userName_a);
+                                // getClientNUserName(outgoingUDPMsg, hostName_a, userName_a);
                                 // dprint("Replying as %s\n", userName_a.c_str());
                             }
                             else
@@ -155,26 +194,27 @@ int main(int argc, char** argv) {
 
                         case REPLY: {
                             // Add host to map if not in map already
-                            if(findHost(incomingUDPMsg) == hostMap.end()) {
+                            if(findClient(incomingUDPMsg) == clientMap.end()) {
                                 // std::string userName_a, hostName_a;
-                                // getHostNUserName(incomingUDPMsg, hostName_a, userName_a);
+                                // getClientNUserName(incomingUDPMsg, hostName_a, userName_a);
                                 dprint("-----NEW HOST-----\n", 0);
-                                addNewHost(incomingUDPMsg);
+                                addNewClient(incomingUDPMsg);
+
+                                // Try to initiate tcp connection with host
+                                // connectToClient();
                             }
-
-                            // Try to initiate tcp connection with host
-
                             break;
                         }
 
                         case CLOSING: {
                             // Remove host from map
-                            std::unordered_map<std::string, struct Host>::iterator it = findHost(incomingUDPMsg);
-                            if(it != hostMap.end())
-                                hostMap.erase(it);
+                            std::unordered_map<std::string, struct Client>::iterator it = findClient(incomingUDPMsg);
+
+                            if(it != clientMap.end())
+                                clientMap.erase(it);
 
                             // If no more host is available, go back to discovery
-                            if(hostMap.empty()) {
+                            if(clientMap.empty()) {
                                 currTimeout = 0;
 
                                 // Resets timeout value
@@ -182,20 +222,97 @@ int main(int argc, char** argv) {
                             }
                             break;
                         }
+
+                        case ESTABLISH_COMM: {
+                            uint8_t ECM[6];
+                            int ECMLen = 6;
+
+                            // memset(ECM, '0', 39);
+                            memcpy(ECM, "P2PI", 4);
+
+                            // TODO: Should poll for user input here
+
+                            // Reply USER UNAVAILABLE MSG if communication is not desired
+                            if(away == 1 || findClient(incomingUDPMsg)->second.block == 1) {
+                                *((uint16_t*)ECM + 2) = htons(USER_UNAVALIBLE);
+
+                                if(sendto(udpSockFd, ECM, ECMLen, 0, 
+                                    (struct sockaddr*)&udpClientAddr, sizeof(udpClientAddr)) < 0) {
+                                    die("Failed to send unicast message");
+                                }
+                            }
+                            // Reply ACCEPT COMMUNICATION MSG
+                            else {
+                                *((uint16_t*)ECM + 2) = htons(ACCEPT_COMM);
+
+                                if(sendto(udpSockFd, ECM, ECMLen, 0, 
+                                    (struct sockaddr*)&udpClientAddr, sizeof(udpClientAddr)) < 0) {
+                                    die("Failed to send unicast message");
+                                }
+
+                                // // Initiate connection
+                                // int numRetries = 0;
+                                // for(; numRetries < 3; numRetries++) {
+                                //     int result = poll(pollFd.data() + 1, 1, 5);
+                                //     if(result > 0 && pollFd[1].revents == POLLIN) {
+                                        findClient(incomingUDPMsg)->second.tcpSockFd = connect(tcpSockFd, (struct sockaddr*)&tcpClientAddr, tcpClientAddrLen);
+                                //         break;
+                                //     }
+                                //     else if(result == 0) {
+                                //         if(sendto(udpSockFd, MSG, ECMLen, 0, 
+                                //             (struct sockaddr*)&udpClientAddr, sizeof(udpClientAddr)) < 0) {
+                                //             die("Failed to send unicast message");
+                                //         }
+                                //     }
+                                // }
+
+                                // if(numRetries == 3) {
+                                //     dprint("-----TCP CONNECT FAILED AFTER MAX RETRY-----\n", 0);
+                                // }
+                            }
+
+                            break;
+                        }
                     }
                 }
             }
 
             // TCP packet
-            // if(pollFd[1].revents == POLLIN) {
+            for(int i = 2; i < pollFd.size(); i++) {
+                if(pollFd[i].revents == POLLIN) {
+                    uint8_t incomingTCPMsg[518];
+                    int recvLen = read(pollFd[i].fd, incomingTCPMsg, 518);
 
-            // }
+                    if(recvLen > 0) {
+                        int type = getType(incomingTCPMsg);
+
+                        dprint("RECV: %d ", type);
+                        // dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
+                        // dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
+
+                        switch(type) {
+                            case REQUEST_USER_LIST: {
+                                break;
+                            }
+                            case REPLY_USER_LIST: {
+                                break;
+                            }
+                            case DATA: {
+                                break;
+                            }
+                            case DISCONTINE_COMM: {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
         }
         else
             dprint("ERROR\n", 0);
     }
 
-
+    /*
     struct termios SavedTermAttributes;
     char* RX[4];
     std::string buffer = "";
@@ -207,7 +324,7 @@ int main(int argc, char** argv) {
 	printf(">");
 	fflush(STDIN_FILENO);
     while(1){
-		retpoll = poll(pollFd, 4, 1000); // to edit
+		retpoll = poll(pollFd.data(), 4, 1000); // to edit
 		//dprint("%d\n",retpoll);
 		if(retpoll == 0) {
 			//dprint("%d", buffer.length());
@@ -248,9 +365,8 @@ int main(int argc, char** argv) {
     }
     
     ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); 
+    */
 
-
-    
     return 0;
 }
 
@@ -268,19 +384,60 @@ void optionError(char** argv){
 }
 
 
+// void findIPNMask() {
+//     char buf[256];
 
-std::string getHostName()
+
+// }
+
+
+void getClientName()
 {
     char buffer[256];
     
     if(-1 == gethostname(buffer, 255)){
-        fprintf(stderr, "Unable to resolve host name.");
-        exit(-1);
+        die("Unable to find local host name.");
     }
 
     struct hostent* localHostEntry = gethostbyname(buffer);
-    strcpy(buffer, localHostEntry->h_name);
-    return std::string(buffer);
+
+    if(!localHostEntry) {
+        die("Unable to resolve local host.");
+    }
+
+    // struct in_addr tmpIPAddr, tmpMask;
+    int found = 0;
+
+    hostName = localHostEntry->h_name;
+
+    memcpy(&tmpIPAddr, localHostEntry->h_addr, localHostEntry->h_length);
+
+    struct ifaddrs *currentIFAddr, *firstIFAddr;
+
+    if(0 > getifaddrs(&firstIFAddr)) {
+        die("Failed to get ifaddr.");
+    }
+
+    currentIFAddr = firstIFAddr;
+
+    do {
+        if(AF_INET == currentIFAddr->ifa_addr->sa_family) {
+            if(0 == memcmp(&((struct sockaddr_in*)currentIFAddr->ifa_addr)->sin_addr, &tmpIPAddr, localHostEntry->h_length)) {
+                memcpy(&tmpMask, &((struct sockaddr_in*)currentIFAddr->ifa_netmask)->sin_addr, localHostEntry->h_length);
+                found = 1;
+                break;
+            }
+        }
+
+        currentIFAddr = currentIFAddr->ifa_next;
+    } while(currentIFAddr);
+
+    freeifaddrs(firstIFAddr);
+    
+    if(!found) {
+        fprintf(stderr, "Failed to find subnet mask.");
+        exit(1);
+    }
 }
 
 
@@ -300,7 +457,7 @@ int getType(uint8_t* message) {
 
 
 
-void getHostNUserName(uint8_t* message, std::string& hostName, std::string& userName) {
+void getClientNUserName(uint8_t* message, std::string& hostName, std::string& userName) {
     hostName = (char*)(message + 10);
     userName = (char*)(message + 10 + hostName.length() + 1);
 }
@@ -325,7 +482,7 @@ void dump(std::string msg)
 
 
 
-void checkIsNum(char* str) {
+void checkIsNum(const char* str) {
     for(int i = 0; i < strlen(str); i++) {
         if(!isdigit(str[i])) {
             fprintf(stderr, "Input %s is not a number!\n", str);
@@ -355,19 +512,19 @@ void sendUDPMessage(int type) {
     *((uint16_t*)outgoingUDPMsg + 2) = htons(type);  
 
     std::string userName_a, hostName_a;
-    getHostNUserName(outgoingUDPMsg, hostName_a, userName_a);
+    getClientNUserName(outgoingUDPMsg, hostName_a, userName_a);
     dprint("SEND: %d ", type);
     
     if(type == REPLY) {
         dprint("SRC - %s : %d ", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
-        dprint("DEST - %s : %d\n", inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));
+        dprint("DEST - %s : %d\n", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
         if(sendto(udpSockFd, outgoingUDPMsg, outgoingUDPMsgLen, 0, 
-            (struct sockaddr*)&clientAddr, sizeof(clientAddr)) < 0) {
+            (struct sockaddr*)&udpClientAddr, sizeof(udpClientAddr)) < 0) {
             die("Failed to send unicast message");
         }
     }
     else {
-        dprint("SRC - %s : %d ", inet_ntoa(clientAddr.sin_addr), ntohs(clientAddr.sin_port));            
+        dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));            
         dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), udpServerAddr.sin_port);
         if(sendto(udpSockFd, outgoingUDPMsg, outgoingUDPMsgLen, 0, 
             (struct sockaddr*)&udpServerAddr, sizeof(udpServerAddr)) < 0) {
@@ -424,8 +581,8 @@ void SIGINT_handler(int signum) {
 
 
 void parseOptions(int argc, char** argv) {
-    // Get default hostname
-    hostName = getHostName();
+    // Get default hostname, IP, and subnet mask
+    getClientName();
 
     // Iterate through all options
     for(int i = 1; i < argc; i++){
@@ -483,11 +640,51 @@ void parseOptions(int argc, char** argv) {
                     break;
                 }
                 // TODO:
-                // case HOST: {
-       //              optionMap[argv[i]] = -1;
-       //              minTimeout = atoi(argv[i + 1]);
-       //              break;
-       //          }
+                case HOST: {
+                    // optionMap[argv[i]] = -1;
+                    std::string tmpArgv = argv[i + 1];
+
+                    // Parse hostname part and port num part
+                    std::size_t pos = tmpArgv.find(":");
+                    if(pos <= 0 || pos == tmpArgv.length() - 1) {
+                        fprintf(stderr, "Invalid argument %s\n", argv[i + 1]);
+                        exit(1);
+                    }
+
+                    std::string tmpHostName = tmpArgv.substr(0, pos);
+                    std::string tmpPortNumStr = tmpArgv.substr(pos + 1);
+                    checkIsNum(tmpPortNumStr.c_str());
+
+                    int tmpPortNum = std::stoi(tmpPortNumStr);
+
+                    dprint("%s %d\n", tmpHostName.c_str(), tmpPortNum);
+
+                    // Check if host is in local subnet
+                    // First resolve host's domain name
+                    struct hostent* remoteHostEntry = gethostbyname(tmpHostName.c_str());
+                    if(!remoteHostEntry) {
+                        die("Failed to resolve host");
+                    }
+
+                    struct in_addr remoteAddr;
+                    char buf[256];
+                    struct ifaddrs *currentIFAddr, *firstIFAddr;
+
+                    memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
+                    // dprint("%s\n", std::string(remoteHostEntry->h_addr).c_str());
+                    inet_ntop(AF_INET, &remoteAddr, buf, INET_ADDRSTRLEN);
+                    dprint("%s\n", buf);
+                    dprint("%lu\n", remoteAddr.s_addr & tmpMask.s_addr);
+                    dprint("%lu\n", tmpIPAddr.s_addr & tmpMask.s_addr);
+                    if((remoteAddr.s_addr & tmpMask.s_addr) == (tmpIPAddr.s_addr & tmpMask.s_addr)) {
+                        dprint("Same subnet\n", 0);
+                    } 
+
+                    // dprint("%s", inet_ntoa(remoteHostEntry->h_addr));
+                    // dprint("%s", remoteHostEntry->h_addr);
+                    // minTimeout = atoi(argv[i + 1]);
+                    break;
+                }
                 default: {
                     optionError(argv);
                 }
@@ -503,7 +700,7 @@ void initUDPMsg() {
     outgoingUDPMsgLen = 10 + hostName.length() + 1 + userName.length() + 1;
     memset(outgoingUDPMsg, 0, MAX_UDP_MSG_LEN);
 
-    memcpy((uint32_t*)outgoingUDPMsg, "P2PI", 4);
+    memcpy(outgoingUDPMsg, "P2PI", 4);
     *((uint16_t*)outgoingUDPMsg + 2) = htons(DISCOVERY);
     *((uint16_t*)outgoingUDPMsg + 3) = htons(udpPort);
     *((uint16_t*)outgoingUDPMsg + 4) = htons(tcpPort);
@@ -514,31 +711,70 @@ void initUDPMsg() {
 
 
 
-void addNewHost(uint8_t* incomingUDPMsg) { 
-    struct Host newHost;
-    getHostNUserName(incomingUDPMsg, newHost.hostName, newHost.userName);
-    getPorts(incomingUDPMsg, newHost.udpPort, newHost.tcpPort);
+// void addNewClient(uint8_t* incomingUDPMsg, int fd) { 
+void addNewClient(uint8_t* incomingUDPMsg) { 
+    struct Client newClient;
+    getClientNUserName(incomingUDPMsg, newClient.hostName, newClient.userName);
+    getPorts(incomingUDPMsg, newClient.udpPort, newClient.tcpPort);
 
-    hostMap[newHost.userName + "@" + newHost.hostName + ":" + std::to_string(newHost.tcpPort)] = newHost;
+    newClient.tcpClientAddr = tcpClientAddr;
+
+    // TCP socket
+    // newClient.tcpSockFd = fd;
+
+    clientMap[newClient.userName] = newClient;
+
+    // struct pollfd newPollfd;
+    // newPollfd.fd = fd;
+    // newPollfd.events = POLLIN;
+    // pollFd.push_back(newPollfd);
 }
 
 
 
-// void addNewHost(uint8_t* incomingUDPMsg) { 
-//     struct Host newHost;
-//     getHostNUserName(incomingUDPMsg, newHost.hostName, newHost.userName);
-//     getPorts(incomingUDPMsg, newHost.udpPort, newHost.tcpPort);
+void connectToClient(std::string clientAtHost) {
+    // Send ESTABLISH COMMUNICATION MSG
+    uint8_t ECM[39];
+    int ECMLen = 4 + 2 + userName.length() + 1;
 
-//     hostMap[newHost.userName + "@" + newHost.hostName + ":" + std::to_string(newHost.tcpPort)] = newHost;
+    memset(ECM, '0', ECMLen);
+    memcpy(ECM, "P2PI", 4);
+    *((uint16_t*)ECM + 2) = htons(ESTABLISH_COMM);
+    memcpy((uint16_t*)ECM + 3, userName.c_str(), userName.length());
+
+    if(sendto(udpSockFd, ECM, ECMLen, 0, 
+        (struct sockaddr*)&udpClientAddr, sizeof(udpClientAddr)) < 0) {
+        die("Failed to send unicast message");
+    }
+}
+//     struct Client client2Connect = clientMap[clientAtHost];
+
+//     // Change port to tcp port
+//     client2Connect.clientAddr.sin_port = htons(tcpPort);
+
+//     int fd = connect(tcpSockFd, (const struct sockaddr*)client2Connect.clientAddr, sizeof(client2Connect.clientAddr));
+
+//     if(0 > fd) {
+//         die("Failed to connect to host");
+//     }
+
+//     clientMap[clientAtHost].tcpSockFd = fd;
+
+//     // Push new connected socket to poll vector
+//     struct pollfd newPollfd;
+//     newPollfd.fd = fd;
+//     newPollfd.events = POLLIN;
+//     pollFd.push_back(newPollfd);
 // }
 
 
-std::unordered_map<std::string, struct Host>::iterator findHost(uint8_t* incomingUDPMsg) {
-    struct Host newHost;
-    getHostNUserName(incomingUDPMsg, newHost.hostName, newHost.userName);
-    getPorts(incomingUDPMsg, newHost.udpPort, newHost.tcpPort);
+
+std::unordered_map<std::string, struct Client>::iterator findClient(uint8_t* incomingUDPMsg) {
+    struct Client newClient;
+    getClientNUserName(incomingUDPMsg, newClient.hostName, newClient.userName);
+    getPorts(incomingUDPMsg, newClient.udpPort, newClient.tcpPort);
     
-    return hostMap.find(newHost.userName + "@" + newHost.hostName + ":" + std::to_string(newHost.tcpPort));
+    return clientMap.find(newClient.userName);
 }
 
 
@@ -566,8 +802,29 @@ void setupSocket() {
     udpServerAddr.sin_addr.s_addr = htonl(INADDR_ANY);
     udpServerAddr.sin_port = htons(udpPort);
 
-    if(-1 == bind(udpSockFd, (struct sockaddr*)&udpServerAddr, sizeof(udpServerAddr)))
-        die("Failed to bind socket");
+    tcpServerAddr.sin_family = AF_INET;
+    tcpServerAddr.sin_addr.s_addr = htonl(INADDR_ANY);
+    tcpServerAddr.sin_port = htons(tcpPort);
 
-    udpServerAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST); 
+    if(-1 == bind(udpSockFd, (struct sockaddr*)&udpServerAddr, sizeof(udpServerAddr)))
+        die("Failed to bind udp socket");
+
+    if(-1 == bind(tcpSockFd, (struct sockaddr*)&tcpServerAddr, sizeof(tcpServerAddr)))
+        die("Failed to bind tcp socket");
+
+    udpServerAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+
+    listen(tcpSockFd, 5);
+}
+
+
+void sendTCPMessage(int type, std::string userName) {
+    uint8_t outgoingTCPMsg[6];
+    memcpy(outgoingTCPMsg, "P2PI", 4);
+    *((uint16_t*)outgoingTCPMsg + 2) = htons(type);
+    int fd = clientMap.find(userName)->second.tcpSockFd;
+
+    if(write(fd, outgoingTCPMsg, 6) < 0) {
+        die("Failed to send TCP message");
+    }
 }
