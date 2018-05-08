@@ -50,7 +50,7 @@ std::vector<struct pollfd> pollFd(3);
 int away = 0;
 
 
-std::unordered_map<std::string, struct Client>::iterator findClient(uint8_t* replyMsg);
+std::unordered_map<std::string, struct Client>::iterator findClient(uint8_t* incomingUDPMsg);
 
 
 int main(int argc, char** argv) {
@@ -146,48 +146,14 @@ int main(int argc, char** argv) {
                                 if(findClient(incomingUDPMsg) == clientMap.end()) {
                                     dprint("-----NEW HOST-----\n", 0);
                                     
-                                    // Wait for new tcp connection request
-                                    // int fd = accept(tcpSockFd, (struct sockaddr*)&tcpClientAddr, &tcpClientAddrLen);
-
-                                    // if(fd > 0) {
-                                        // addNewClient(incomingUDPMsg, fd);
-                                        addNewClient(incomingUDPMsg);
-                                    // }
-
+                                    addNewClient(incomingUDPMsg);
                                 }
 
                                 // Should send reply regardless the host is already known
                                 sendUDPMessage(REPLY);
-
-                                // struct Client client2Connect = clientMap[clientAtHost];
-
-                                // Change port to tcp port
-                                // client2Connect.clientAddr.sin_port = htons(tcpPort);
-
-                                // int fd = connect(tcpSockFd, (const struct sockaddr*)client2Connect.clientAddr, sizeof(client2Connect.clientAddr));
-
-                                // if(0 > fd) {
-                                    // die("Failed to connect to host");
-                                // }
-
-                                // clientMap[clientAtHost].tcpSockFd = fd;
-
-                                // Push new connected socket to poll vector
-                                // struct pollfd newPollfd;
-                                // newPollfd.fd = fd;
-                                // newPollfd.events = POLLIN;
-                                // pollFd.push_back(newPollfd);
-                                
-                                // std::string userName_a, hostName_a;
-                                // getClientNUserName(outgoingUDPMsg, hostName_a, userName_a);
-                                // dprint("Replying as %s\n", userName_a.c_str());
                             }
                             else
                                 dprint("-----SELF DISCOVERY-----\n", 0);
-
-                            // Send reply message
-
-                            // Wait for tcp connection
 
                             break;
                         }
@@ -222,63 +188,50 @@ int main(int argc, char** argv) {
                             }
                             break;
                         }
-
-                        case ESTABLISH_COMM: {
-                            uint8_t ECM[6];
-                            int ECMLen = 6;
-
-                            // memset(ECM, '0', 39);
-                            memcpy(ECM, "P2PI", 4);
-
-                            // TODO: Should poll for user input here
-
-                            // Reply USER UNAVAILABLE MSG if communication is not desired
-                            if(away == 1 || findClient(incomingUDPMsg)->second.block == 1) {
-                                *((uint16_t*)ECM + 2) = htons(USER_UNAVALIBLE);
-
-                                if(sendto(udpSockFd, ECM, ECMLen, 0, 
-                                    (struct sockaddr*)&udpClientAddr, sizeof(udpClientAddr)) < 0) {
-                                    die("Failed to send unicast message");
-                                }
-                            }
-                            // Reply ACCEPT COMMUNICATION MSG
-                            else {
-                                *((uint16_t*)ECM + 2) = htons(ACCEPT_COMM);
-
-                                if(sendto(udpSockFd, ECM, ECMLen, 0, 
-                                    (struct sockaddr*)&udpClientAddr, sizeof(udpClientAddr)) < 0) {
-                                    die("Failed to send unicast message");
-                                }
-
-                                // // Initiate connection
-                                // int numRetries = 0;
-                                // for(; numRetries < 3; numRetries++) {
-                                //     int result = poll(pollFd.data() + 1, 1, 5);
-                                //     if(result > 0 && pollFd[1].revents == POLLIN) {
-                                        findClient(incomingUDPMsg)->second.tcpSockFd = connect(tcpSockFd, (struct sockaddr*)&tcpClientAddr, tcpClientAddrLen);
-                                //         break;
-                                //     }
-                                //     else if(result == 0) {
-                                //         if(sendto(udpSockFd, MSG, ECMLen, 0, 
-                                //             (struct sockaddr*)&udpClientAddr, sizeof(udpClientAddr)) < 0) {
-                                //             die("Failed to send unicast message");
-                                //         }
-                                //     }
-                                // }
-
-                                // if(numRetries == 3) {
-                                //     dprint("-----TCP CONNECT FAILED AFTER MAX RETRY-----\n", 0);
-                                // }
-                            }
-
-                            break;
-                        }
                     }
                 }
             }
 
+            // new TCP connection
+            if(pollFd[2].revents == POLLIN) {
+                int newConn = accept(tcpSockFd, (struct sockaddr*)&tcpClientAddr, &tcpClientAddrLen);
+                
+                uint8_t incomingTCPMsg[518];
+                int recvLen = read(newConn, incomingTCPMsg, 518);
+
+                if(recvLen > 0 && getType(incomingTCPMsg) == ESTABLISH_COMM) {
+                    newClientName = (char*)((uint16_t*)incomingTCPMsg + 3);
+                    uint8_t ECM[6];
+                    int ECMLen = 6;
+                    memcpy(ECM, "P2PI", 4);
+                    
+                    if(away || clientMap.find(newClientName)->second.block) {
+                        // Send user unavailable message
+                        *((uint16_t*)ECM + 2) = htons(USER_UNAVALIBLE);
+
+                        // Close connection
+                        close(newConn);
+                    }
+                    else {
+                        // Send accept comm message
+                        *((uint16_t*)ECM + 2) = htons(ACCEPT_COMM);
+
+                        clientMap.find(newClientName)->second.tcpSockFd = newConn;
+
+                        // Push fd to pollfd vector
+                        struct pollfd newPollFd;
+                        newPollFd.fd = newConn;
+                        newPollFd.events = POLLIN;
+                        pollFd.push_back(newPollFd);
+                    }
+
+                    if(write(newConn, ECM, 6) < 0) {
+                        die("Failed to establish TCP connection.");
+                    }
+                }
+            }
             // TCP packet
-            for(int i = 2; i < pollFd.size(); i++) {
+            for(int i = 3; i < pollFd.size(); i++) {
                 if(pollFd[i].revents == POLLIN) {
                     uint8_t incomingTCPMsg[518];
                     int recvLen = read(pollFd[i].fd, incomingTCPMsg, 518);
@@ -291,6 +244,15 @@ int main(int argc, char** argv) {
                         // dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
 
                         switch(type) {
+                            case ACCEPT_COMM: {
+                                break;
+                            }
+                            case USER_UNAVALIBLE: {
+                                // Close connection as well
+                                close(pollFd[i].fd);
+                                pollFd.erase(pollFd.begin() + i);
+                                break;
+                            }
                             case REQUEST_USER_LIST: {
                                 break;
                             }
@@ -673,11 +635,12 @@ void parseOptions(int argc, char** argv) {
                     memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
                     // dprint("%s\n", std::string(remoteHostEntry->h_addr).c_str());
                     inet_ntop(AF_INET, &remoteAddr, buf, INET_ADDRSTRLEN);
-                    dprint("%s\n", buf);
-                    dprint("%lu\n", remoteAddr.s_addr & tmpMask.s_addr);
-                    dprint("%lu\n", tmpIPAddr.s_addr & tmpMask.s_addr);
-                    if((remoteAddr.s_addr & tmpMask.s_addr) == (tmpIPAddr.s_addr & tmpMask.s_addr)) {
-                        dprint("Same subnet\n", 0);
+                    // dprint("%s\n", buf);
+                    // dprint("%lu\n", remoteAddr.s_addr & tmpMask.s_addr);
+                    // dprint("%lu\n", tmpIPAddr.s_addr & tmpMask.s_addr);
+                    if((remoteAddr.s_addr & tmpMask.s_addr) != (tmpIPAddr.s_addr & tmpMask.s_addr)) {
+                        // dprint("Same subnet\n", 0);
+                        ;
                     } 
 
                     // dprint("%s", inet_ntoa(remoteHostEntry->h_addr));
@@ -717,22 +680,21 @@ void addNewClient(uint8_t* incomingUDPMsg) {
     getClientNUserName(incomingUDPMsg, newClient.hostName, newClient.userName);
     getPorts(incomingUDPMsg, newClient.udpPort, newClient.tcpPort);
 
+    // Store the TCP address
+    struct sockaddr_in tcpClientAddr = udpClientAddr;
+    udpClientAddr.sin_port = htons(newClient.tcpPort);
     newClient.tcpClientAddr = tcpClientAddr;
 
-    // TCP socket
-    // newClient.tcpSockFd = fd;
-
+    // Inserting newClient to map
     clientMap[newClient.userName] = newClient;
-
-    // struct pollfd newPollfd;
-    // newPollfd.fd = fd;
-    // newPollfd.events = POLLIN;
-    // pollFd.push_back(newPollfd);
 }
 
 
 
-void connectToClient(std::string clientAtHost) {
+void connectToClient(std::string clientName) {
+    struct sockaddr_in client2ConnetAddr = clientMap.find(clientName)->second.tcpClientAddr;
+    int newConn = connect(tcpSockFd, (struct sockaddr *)&client2ConnetAddr, sizeof(client2ConnetAddr));
+
     // Send ESTABLISH COMMUNICATION MSG
     uint8_t ECM[39];
     int ECMLen = 4 + 2 + userName.length() + 1;
@@ -742,30 +704,13 @@ void connectToClient(std::string clientAtHost) {
     *((uint16_t*)ECM + 2) = htons(ESTABLISH_COMM);
     memcpy((uint16_t*)ECM + 3, userName.c_str(), userName.length());
 
-    if(sendto(udpSockFd, ECM, ECMLen, 0, 
-        (struct sockaddr*)&udpClientAddr, sizeof(udpClientAddr)) < 0) {
-        die("Failed to send unicast message");
+    if(write(newConn, ECM, ECMLen) < 0) {
+        die("Failed to send ESTABLISH COMM message.");
     }
+
+    // Record the newly connected tcp socket
+    clientMap.find(clientName)->second.tcpSockFd = newConn;
 }
-//     struct Client client2Connect = clientMap[clientAtHost];
-
-//     // Change port to tcp port
-//     client2Connect.clientAddr.sin_port = htons(tcpPort);
-
-//     int fd = connect(tcpSockFd, (const struct sockaddr*)client2Connect.clientAddr, sizeof(client2Connect.clientAddr));
-
-//     if(0 > fd) {
-//         die("Failed to connect to host");
-//     }
-
-//     clientMap[clientAtHost].tcpSockFd = fd;
-
-//     // Push new connected socket to poll vector
-//     struct pollfd newPollfd;
-//     newPollfd.fd = fd;
-//     newPollfd.events = POLLIN;
-//     pollFd.push_back(newPollfd);
-// }
 
 
 
