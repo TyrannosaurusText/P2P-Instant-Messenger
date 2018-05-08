@@ -143,6 +143,9 @@ int main(int argc, char** argv) {
 	SetNonCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
     int bytesRead, retpoll;
 	printf(">");
+	struct winsize size;
+	ioctl(STDOUT_FILENO,TIOCGWINSZ,&size);
+	int numcol = size.ws_col;
 	fflush(STDIN_FILENO);
     while(1){
 		retpoll = poll(pollFd.data(), 4, 1000); // to edit
@@ -166,20 +169,28 @@ int main(int argc, char** argv) {
 					printf("\r%s>%s\n",userName.c_str(), message.c_str());
 					//TODO: Actually proccess message
 					message.clear();
+					printf("\n\033[1B");
 				}
 				else if(buffer[0] == 0x7F) { //delete char
 					if(message.length() > 0) {
 						message.erase(message.length()-1);
+						printf("\033[1D  "); //clears current and next char in terminal
+						
 					}
 				}
-				else if(message.length() < 192) {
+				else if(message.length() < 512){
 					message += buffer[0];
+					//eraselines(message.length()/numcol);
 				}
 			}
 			printf("\r\b\b\n");
 			printf(">%s ", message.c_str(), message.length());
 			
-			printf("\033[0D"); //mv cursor
+			if(message.length()+1 > numcol) //simulate loop
+				printf("\b\r%s", message.substr(message.length()-numcol, numcol).c_str());
+			else
+				printf("\b\r>%s", message.c_str());
+		
 			fflush(STDIN_FILENO);
 			buffer.clear();
 		}
