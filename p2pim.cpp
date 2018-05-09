@@ -251,7 +251,7 @@ void die(const char *message) {
 }
 
 int getType(uint8_t* message) {
-    return ntohs(*((uint16_t*)message + 2));
+    return ntohs(*(uint16_t*)(message + 4));
 }
 
 void getClientNUserName(uint8_t* message, std::string& hostName, std::string& userName) {
@@ -631,7 +631,8 @@ void checkTCPPort(std::string newClientName) {
     }
 }
 
-void checkUDPPort(int &baseTimeout, int &currTimeout) {
+void checkUDPPort(int &baseTimeout, int &currTimeout) 
+{
      // Reply message
     uint8_t incomingUDPMsg[MAX_UDP_MSG_LEN];
     udpClientAddrLen = sizeof(udpClientAddr);
@@ -684,7 +685,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
 
                         // Try to initiate tcp connection with host
                         dprint("%s\n", clientMap.begin()->first.c_str());
-                        // connectToClient(clientMap.begin()->first);
+                        connectToClient(clientMap.begin()->first);
                     }
                     break;
                 }
@@ -720,15 +721,28 @@ void checkConnections()
         if(it->revents == POLLIN) {
             dprint("%d has something, size %d\n", it->fd, pollFd.size());
             uint8_t incomingTCPMsg[518];
+            std::string buffer="";
             bzero(incomingTCPMsg, 518);
-            int recvLen, j = 0;
-
+            int recvLen=0;
+            dprint("hiasjld\n",0);
             do {
-                recvLen = read(it->fd, incomingTCPMsg + j, 1);
-                j++;
-            } while(j < 6);
-
-            int type = getType(incomingTCPMsg);
+                bzero(incomingTCPMsg, 518);
+                recvLen += read(it->fd, incomingTCPMsg, 518);
+                buffer.append((char*)incomingTCPMsg);
+            } while(recvLen < 500 && 1 == poll(&(*it), 1, 50) && it->revents == POLLIN);
+            dprint("length %d\n", recvLen);
+            dprint("TCP\n",0);
+            for(int i = 0; i < recvLen; i++)
+            {
+                dprint("%d %c\n", incomingTCPMsg[i], incomingTCPMsg[i]);
+            }
+            dprint("BUFF\n",0);
+            for(int i = 0; i < recvLen; i++)
+            {
+                dprint("%d %c\n", buffer.c_str()[i], buffer.c_str()[i]);
+            }
+            dprint("\n",0);
+            int type = getType((uint8_t*)buffer.c_str());
 
             dprint("RECV: %d\n", type);
             dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
@@ -737,15 +751,17 @@ void checkConnections()
             switch(type) {
                 case ESTABLISH_COMM: {
                     int j = 0, recvLen;
-                    char newClientNameArr[32];
-                    do {
-                        recvLen = read(it->fd, newClientNameArr + j, 1);
-                        if(newClientNameArr[j] == 0)
-                            break;
-                        j++;
-                    } while(1);
+                    // char newClientNameArr[32];
+                    // do {
+                    //     recvLen = read(it->fd, newClientNameArr + j, 1);
+                    //     if(newClientNameArr[j] == 0)
+                    //         break;
+                    //     j++;
+                    // } while(1);
 
-                    std::string newClientName = newClientNameArr;
+                    // std::string newClientName = newClientNameArr;
+
+                    std::string newClientName = (char*)(incomingTCPMsg + 6);
 
                     uint8_t ECM[6];
                     int ECMLen = 6;
@@ -852,85 +868,42 @@ void checkConnections()
                 }
                 case REPLY_USER_LIST: {
                     // Get the entry count
-                    int j = 0, recvLen;
-                    uint8_t entryCountArr[5];
-                    memset(entryCountArr, 0, 5);
-
-                    do {
-                        recvLen = read(it->fd, entryCountArr + j, 1);
-                        j++;
-                    } while(j < 4);
-
-                    int entryCount = ntohs(*(uint32_t*)entryCountArr);
+                    
+                    fflush(STDIN_FILENO);
+                    int entryCount = ntohl(*(uint32_t*)(buffer.c_str()+6));
 
                     dprint("Entry count is %d", entryCount);
+                    int bytesProccessed=10;
+                    struct Client entry;
 
-                    uint8_t entryArr[8 + 256 + 32 + 2];
+                    //uint8_t entryArr[8 + 256 + 32 + 2];
                     for(int k = 0; k < entryCount; k++) {
-
-                        int n = 0;
-                        // get entry number
-                        do {
-                            recvLen = read(it->fd, entryArr + n, 1);
-                            n++;
-                        } while(n < 4);
-
-                        int entryNum = ntohs(*(uint32_t*)entryArr);
-                        dprint("entry num is %d\n", entryNum);
-
                         struct Client newClient;
-                        n = 0;
-                        // get udp port
-                        do {
-                            recvLen = read(it->fd, entryArr + 4 + n, 1);
-                            n++;
-                        } while(n < 2);
 
-                        newClient.udpPort = ntohs(*((uint16_t*)entryArr + 2));
+                        int entryNumber = ntohl(*(uint32_t*)(buffer.c_str()+bytesProccessed));
+                        bytesProccessed += 4;
+                        dprint("entry num is %d\n", entryNumber);
+
+                        entry.udpPort = ntohs(*(uint16_t*)(buffer.c_str()+bytesProccessed));
+                        bytesProccessed += 2;
                         dprint("udpPort is %d\n", newClient.udpPort);
 
-                        n = 0;
-                        // get hostname
-                        do {
-                            recvLen = read(it->fd, entryArr + 6 + n, 1);
-                            dprint("%d %c\n", n, *(char*)(entryArr + 6 + n));
-                            if(entryArr[6 + n] == 0)
-                                break;
-                            n++;
-                        } while(1);
-
-                        newClient.hostName = (char*)(entryArr + 6);
+                        entry.hostName = (char*)(buffer.c_str() + bytesProccessed);
+                        bytesProccessed += entry.hostName.length()+1;
                         dprint("hostname is %s\n", newClient.hostName.c_str());
 
-
-                        n = 0;
-                        // get tcp port
-                        do {
-                            recvLen = read(it->fd, entryArr + 6 + n + newClient.hostName.length() + 1, 1);
-
-                            n++;
-                        } while(n < 2);
-
-                        newClient.tcpPort = ntohs(*((uint16_t*)(entryArr + 6 + newClient.hostName.length() + 1)));
+                        entry.tcpPort = ntohs(*((uint16_t*)(buffer.c_str() + bytesProccessed)));
+                        bytesProccessed += 2;
                         dprint("tcpPort is %d\n", newClient.tcpPort);
 
-                        n = 0;
-                        // get username
-                        do {
-                            recvLen = read(it->fd, entryArr + 6 + n + newClient.hostName.length() + 1 + 2, 1);
-                            dprint("%d %c\n", n, *(char*)(entryArr + 6 + n + newClient.hostName.length() + 1 + 2));
+                        entry.userName = (char*)(buffer.c_str() + bytesProccessed);
+                        bytesProccessed += entry.userName.length()+1;
 
-                            if(entryArr[6 + n + newClient.hostName.length() + 1 + 2] == 0)
-                                break;
-                            n++;
-                        } while(1);
-
-                        newClient.userName = (char*)(entryArr + 6 + newClient.hostName.length() + 2 + 1);
-
-                        dprint("username %s, hostname %s, tcp %d, udp %d\n", newClient.userName.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
+                        dprint("username %s, hostname %s, tcp %d, udp %d\n", 
+                            entry.userName.c_str(), entry.hostName.c_str(), entry.tcpPort, entry.udpPort);
 
                         if(clientMap.find(newClient.userName) == clientMap.end()) {
-                            clientMap[newClient.userName] = newClient;
+                            clientMap[newClient.userName] = entry;
                         }
                     }
 
