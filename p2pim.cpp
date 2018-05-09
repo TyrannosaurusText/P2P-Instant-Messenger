@@ -776,14 +776,27 @@ void checkConnections()
     		uint8_t incomingTCPMsg[518];
             int recvLen, j = 0;
 
+            // fcntl(it->fd, F_SETFL, (fcntl(it->fd, F_GETFL) | O_NONBLOCK));
+
             do {
                 recvLen = read(it->fd, incomingTCPMsg + j, 1);
+                // dprint("recvLen is %d\n", recvLen);
+                // dprint("%s\n", incomingTCPMsg);
+
                 j++;
-            } while(recvLen != 0);
+            } while(j < 6);
 
-            dump(std::string((char*)incomingTCPMsg));
+            // dataBuffer += (char*)incomingTCPMsg;
 
-    		if(recvLen > 0) {
+            // dprint("dataBuffer is %s\n", dataBuffer.c_str());
+
+            // recvLen = dataBuffer.length();
+
+
+
+            // dump(std::string((char*)incomingTCPMsg));
+
+    		// if(j > 0) {
     			int type = getType(incomingTCPMsg);
 
     			dprint("RECV: %d\n", type);
@@ -796,8 +809,20 @@ void checkConnections()
                         // int recvLen = read(newConn, incomingTCPMsg, 518);
 
                         // if(recvLen > 0 && getType(incomingTCPMsg) == ESTABLISH_COMM) {
-                        dprint("ESTABLISH_COM length is %d\n", recvLen);
-                        std::string newClientName = (char*)((uint16_t*)incomingTCPMsg + 3);
+                        // dprint("ESTABLISH_COM length is %d\n", recvLen);
+                        int j = 0, recvLen;
+                        char newClientNameArr[32];
+                        do {
+                            recvLen = read(it->fd, newClientNameArr + j, 1);
+                            // dprint("recvLen is %d\n", recvLen);
+                            // dprint("%s\n", incomingTCPMsg);
+
+                            j++;
+                        } while(newClientNameArr[j - 1] != 0);
+
+                        std::string newClientName = newClientNameArr;
+
+                        // std::string newClientName = (char*)((uint16_t*)incomingTCPMsg + 3);
                         uint8_t ECM[6];
                         int ECMLen = 6;
                         memcpy(ECM, "P2PI", 4);
@@ -839,13 +864,13 @@ void checkConnections()
                             }
                         }
 
-                            
+                        break;
                         // }
                     }
     				case ACCEPT_COMM: {
                         dprint("Connected to user %s\n", tcpConnMap.find(it->fd)->second.c_str());
-                        // std::string str = "I promised to look after a friends cat for the week. My place has a glass atrium that goes through two levels, I have put the cat in there with enough food and water to last the week. I am looking forward to the end of the week. It is just sitting there glaring at me, it doesn't do anything else. I can tell it would like to kill me. If I knew I could get a perfect replacement cat, I would kill this one now and replace it Friday afternoon. As we sit here glaring at each other I have already worked out several ways to kill it. The simplest would be to drop heavy items on it from the upstairs bedroom though I have enough basic engineering knowledge to assume that I could build some form of 'spear like' projectile device from parts in the downstairs shed. If the atrium was waterproof, the most entertaining would be to flood it with water. It wouldn't have to be that deep, just deeper than the cat. I don't know how long cats can swim but I doubt it would be for a whole week. If it kept the swimming up for too long I could always try dropping things on it as well. I have read that drowning is one of the most peaceful ways to die so really it would be a win win situation for me and the cat I think.";
-                        std::string str = "yo";
+                        std::string str = "I promised to look after a friends cat for the week. My place has a glass atrium that goes through two levels, I have put the cat in there with enough food and water to last the week. I am looking forward to the end of the week. It is just sitting there glaring at me, it doesn't do anything else. I can tell it would like to kill me. If I knew I could get a perfect replacement cat, I would kill this one now and replace it Friday afternoon. As we sit here glaring at each other I have already worked out several ways to kill it. The simplest would be to drop heavy items on it from the upstairs bedroom though I have enough basic engineering knowledge to assume that I could build some form of 'spear like' projectile device from parts in the downstairs shed. If the atrium was waterproof, the most entertaining would be to flood it with water. It wouldn't have to be that deep, just deeper than the cat. I don't know how long cats can swim but I doubt it would be for a whole week. If it kept the swimming up for too long I could always try dropping things on it as well. I have read that drowning is one of the most peaceful ways to die so really it would be a win win situation for me and the cat I think.";
+                        // std::string str = "yo";
                         uint8_t ECM[6 + str.length() + 1];
                         int ECMLen = 8;
                         memset(ECM, 0, 6 + str.length() + 1);
@@ -876,8 +901,23 @@ void checkConnections()
     					break;
     				}
     				case DATA: {
+                        // Read in data
+                        int j = 0, recvLen;
+                        // std::string dataBuffer = "";
+                        char dataMsg[512];
+                        do {
+                            recvLen = read(it->fd, dataMsg + j, 1);
+                            // dprint("recvLen is %d\n", recvLen);
+                            // dprint("%s\n", incomingTCPMsg);
+
+                            j++;
+
+                        } while(dataMsg[j - 1] != 0);
+
+                        // std::string newClientName = newClientNameArr;
+
 						dprint("User %s message.\n", tcpConnMap.find(it->fd)->second.c_str());
-						printf("%s\n",incomingTCPMsg+6);
+						printf("%s\n", dataMsg);
     					break;
     				}
     				case DISCONTINUE_COMM: {
@@ -888,10 +928,14 @@ void checkConnections()
                         it = pollFd.erase(it);
                         continue;
     				}
+                    default: {
+                        dprint("WHAT IS HAPPENING?\n", 0);
+                        break;
+                    }
     			}
 
                 
-    		}
+    		// }
     	}
         
         
@@ -970,16 +1014,16 @@ void checkSTDIN()
 }
 
 void sendDataMessage(std::string message){
-	uint8_t outgoingTCPMsg[6+513];  //max length data is 512
-	bzero(outgoingTCPMsg, 6+513);
+	uint8_t outgoingTCPMsg[6+512];  //max length data is 512
+	bzero(outgoingTCPMsg, 6+512);
 	uint16_t type = htons((uint16_t)8);
 	memcpy(outgoingTCPMsg, "P2PI", 4);
 	memcpy(outgoingTCPMsg+4, &type, 2);
-	memcpy(outgoingTCPMsg+6, message.c_str(), 512);
+	memcpy(outgoingTCPMsg+6, message.c_str(), 511);
 
 	 //currentConnection is the fd that the client wishes to speak to.
 	if(write(currentConnection,outgoingTCPMsg, message.length()+5) < 0)
-		die("Failed to establish TCP connection.");
+		die("Failed to establish send data.");
 		
 	message.clear();
 }

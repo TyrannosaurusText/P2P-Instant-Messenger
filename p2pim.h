@@ -24,6 +24,7 @@
 #include <ifaddrs.h>
 #include <vector>
 #include <sys/ioctl.h>
+#include <fcntl.h>
 
 
 
