@@ -947,10 +947,12 @@ void checkConnections()
                             memcpy(userEntry + 6, c.second.hostName.c_str(), c.second.hostName.length());
                             // *(userEntry + 6 + c.second.hostName.length() + 1) = 0;
                             *((uint16_t*)(userEntry + 6 + c.second.hostName.length() + 1)) = htons(c.second.tcpPort);
-                            dprint("tcp should be %d\n", *((uint16_t*)(userEntry + 6 + c.second.hostName.length() + 2)));
+                            dprint("tcp should be %d\n", ntohs(*((uint16_t*)(userEntry + 6 + c.second.hostName.length() + 1))));
                             dprint("len is %d\n", 6 + c.second.hostName.length() + 1);
                             dprint("hostname is %s\n", (userEntry + 6));
                             memcpy(userEntry + 6 + c.second.hostName.length() + 1 + 2, c.second.userName.c_str(), c.second.userName.length());
+                            dprint("username is %s\n", (userEntry + 6 + c.second.hostName.length() + 1 + 2));
+
                             // *(userEntry + 6 + c.second.hostName.length() + 2 + 2 + c.second.userName.length() + 2) = 0;
                             i++;
 
@@ -959,7 +961,7 @@ void checkConnections()
                             // }
                             // dprint("\n", 0);
 
-                            if(0 > write(it->fd, userEntry, 6 + c.second.hostName.length() + 2 + 1 + c.second.userName.length() + 2))
+                            if(0 > write(it->fd, userEntry, 6 + c.second.hostName.length() + 2 + 1 + c.second.userName.length() + 1))
                                 die("Failed to send user list entry");
                         }
 
@@ -1011,7 +1013,7 @@ void checkConnections()
                             // get hostname
                             do {
                                 recvLen = read(it->fd, entryArr + 6 + n, 1);
-                                dprint("%d %c\n", n, (char*)(entryArr + 6 + n));
+                                dprint("%d %c\n", n, *(char*)(entryArr + 6 + n));
                                 if(entryArr[6 + n] == 0)
                                     break;
                                 n++;
@@ -1029,14 +1031,16 @@ void checkConnections()
                                 n++;
                             } while(n < 2);
 
-                            newClient.tcpPort = ntohs(*((uint16_t*)(entryArr + 6 + n + newClient.hostName.length() + 1)));
+                            newClient.tcpPort = ntohs(*((uint16_t*)(entryArr + 6 + newClient.hostName.length() + 1)));
                             dprint("tcpPort is %d\n", newClient.tcpPort);
 
                             n = 0;
                             // get username
                             do {
                                 recvLen = read(it->fd, entryArr + 6 + n + newClient.hostName.length() + 1 + 2, 1);
-                                if(entryArr[6 + n + newClient.hostName.length() + 2 + 2] == 0)
+                                dprint("%d %c\n", n, *(char*)(entryArr + 6 + n + newClient.hostName.length() + 1 + 2));
+
+                                if(entryArr[6 + n + newClient.hostName.length() + 1 + 2] == 0)
                                     break;
                                 n++;
                             } while(1);
