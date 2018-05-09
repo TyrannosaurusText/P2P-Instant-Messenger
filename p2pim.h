@@ -25,14 +25,6 @@
 #include <vector>
 #include <sys/ioctl.h>
 
-#define DEBUG 1
-
-#ifdef DEBUG
-    #define dprint(string, ...) printf(string,__VA_ARGS__)
-#else
-    #define dprint(string, ...) 
-#endif
-
 
 
 #define DISCOVERY 1
@@ -45,6 +37,13 @@
 #define REPLY_USER_LIST 8
 #define DATA 9
 #define DISCONTINUE_COMM 10
+
+#define CONNECT 1
+#define LIST 2
+#define DISCONNECT 3
+#define GETLIST 4
+#define HELP 5
+
 
 void ResetCanonicalMode(int fd, struct termios *savedattributes);
 void SetNonCanonicalMode(int fd, struct termios *savedattributes);
@@ -68,3 +67,5 @@ void checkUDPPort(int baseTimeout, int &currTimeout);
 void checkTCPPort(std::string newClientName);
 void checkConnections();
 void sendUDPMessage(int type);
+void checkSTDIN();
+void sendDataMessage(std::string Message);

@@ -1,5 +1,12 @@
 #include "p2pim.h"
 
+#define DEBUG 0
+
+#ifdef DEBUG
+    #define dprint(string, ...) printf(string,__VA_ARGS__)
+#else
+    #define dprint(string, ...) 
+#endif
 
 #define MAX_UDP_MSG_LEN (10 + 254 + 32 + 2)
 
@@ -12,6 +19,12 @@ enum Option {USERNAME, UDP_PORT, TCP_PORT, MIN_TIMEOUT, MAX_TIMEOUT, HOST};
 static std::unordered_map<std::string, int> optionMap {
     {"-u", USERNAME}, {"-up", UDP_PORT}, {"-tp", TCP_PORT}, 
     {"-dt", MIN_TIMEOUT}, {"-dm", MAX_TIMEOUT}, {"-pp", HOST}
+	
+};
+
+static std::unordered_map<std::string, int> commandMap {
+	{"\\connect", CONNECT}, {"\\list", LIST}, {"\\disconnect", DISCONNECT}, {"\\getlist", GETLIST},
+	{"\\help", HELP}
 };
 
 
@@ -57,7 +70,14 @@ std::vector<struct pollfd> pollFd(3);
 std::vector<struct Host> unicastHosts;
 
 int away = 0;
+	
+int bytesRead, retpoll, numcol;
+struct winsize size;
+char* RX[4]; //stdin buffer
+std::string buffer = "";
+std::string message = "";
 
+int currentConnection = 0;
 
 std::unordered_map<std::string, struct Client>::iterator findClient(uint8_t* incomingUDPMsg);
 
@@ -80,7 +100,10 @@ int main(int argc, char** argv) {
     // dprint("Mintimeout = %d\n", minTimeout);
     // dprint("Maxtimeout = %d\n", maxTimeout);
 
+	struct termios SavedTermAttributes;
 
+	pollFd[terminalFDPOLL].fd = STDIN_FILENO;
+	pollFd[terminalFDPOLL].events = POLLIN;
     pollFd[udpFDPOLL].fd = udpSockFd;
     pollFd[udpFDPOLL].events = POLLIN;
     pollFd[tcpFDPOLL].fd = tcpSockFd;
@@ -90,7 +113,10 @@ int main(int argc, char** argv) {
     int timePassed;
     int currTimeout = 0;
 
-
+	
+	SetNonCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
+	printf(">");
+	fflush(STDIN_FILENO);
     // When no host is available and maxTimeout not exceeded, discovery hosts
     while(baseTimeout <= maxTimeout * 1000) {
         
@@ -140,7 +166,13 @@ int main(int argc, char** argv) {
         // Wait for reply message
         gettimeofday(&start, NULL);
         //TODO: there is a potential bug, where currTimeout is set to 0 and poll returns immediately
-        int rc = poll(pollFd.data() + udpFDPOLL, pollFd.size() - 1, currTimeout);
+		/* for( auto i : pollFd)
+		{
+			dprint("%d\n", i.fd);
+		} */
+
+        dprint("Curr timeout is %d\n", currTimeout);
+        int rc = poll(pollFd.data(), pollFd.size(), currTimeout);
         gettimeofday(&end, NULL);
         timePassed = ((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec) / 1000;
         currTimeout -= timePassed;
@@ -158,9 +190,10 @@ int main(int argc, char** argv) {
         }
         else if(rc > 0) {
             // dprint("Something is available\n", 0);
-
             std::string newClientName, newUserName;
-
+            // checkSTDIN();
+			
+			
             checkUDPPort(baseTimeout, currTimeout);
             // new TCP connection
 			checkTCPPort(newClientName);
@@ -173,71 +206,12 @@ int main(int argc, char** argv) {
             dprint("ERROR\n", 0);
     }
 
-    /*
-    struct termios SavedTermAttributes;
-    char* RX[4];
-    std::string buffer = "";
-	pollFd[terminalFDPOLL].fd = STDIN_FILENO;
-	pollFd[terminalFDPOLL].events = POLLIN;
-	std::string message = "";
-	SetNonCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
-    int bytesRead, retpoll;
-	printf(">");
-	struct winsize size;
-	ioctl(STDOUT_FILENO,TIOCGWINSZ,&size);
-	int numcol = size.ws_col;
-	fflush(STDIN_FILENO);
-    while(1){
-		retpoll = poll(pollFd.data(), 4, 1000); // to edit
-		//dprint("%d\n",retpoll);
-		if(retpoll == 0) {
-			//dprint("%d", buffer.length());
-			
-		}
-		if(pollFd[terminalFDPOLL].events & POLLIN) {
-			int bytesRead = read(STDIN_FILENO, &RX, 4);
-			if (bytesRead < 2)
-			buffer.append((const char*)RX);
-			//dprint("buffer len: %d\n", buffer.length());
-			
-			//dprint("buffer: %c\n", buffer[0]);
-			if(bytesRead == 1) {
-				//printf("%c",buffer[0]);
-				fflush(STDIN_FILENO);
-				
-				if(buffer[0] == '\n') { //send message
-					printf("\r%s>%s\n",userName.c_str(), message.c_str());
-					//TODO: Actually proccess message
-					message.clear();
-					printf("\n\033[1B");
-				}
-				else if(buffer[0] == 0x7F) { //delete char
-					if(message.length() > 0) {
-						message.erase(message.length()-1);
-						printf("\033[1D  "); //clears current and next char in terminal
-						
-					}
-				}
-				else if(message.length() < 512){
-					message += buffer[0];
-					//eraselines(message.length()/numcol);
-				}
-			}
-			printf("\r\b\b\n");
-			printf(">%s ", message.c_str(), message.length());
-			
-			if(message.length()+1 > numcol) //simulate loop
-				printf("\b\r%s", message.substr(message.length()-numcol, numcol).c_str());
-			else
-				printf("\b\r>%s", message.c_str());
-		
-			fflush(STDIN_FILENO);
-			buffer.clear();
-		}
-    }
+    
+    
+    
     
     ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); 
-    */
+    
 
     return 0;
 }
@@ -689,7 +663,7 @@ void sendTCPMessage(int type, std::string userName) {
 }
 
 void checkTCPPort(std::string newClientName) {
-	if(pollFd[tcpFDPOLL].revents == POLLIN) {
+	if(pollFd[tcpFDPOLL].revents & POLLIN) {
         dprint("NEW HOST TRYING TO CONNECT\n", 0);
 
 		int newConn = accept(tcpSockFd, (struct sockaddr*)&tcpClientAddr, &tcpClientAddrLen);
@@ -711,7 +685,7 @@ void checkUDPPort(int baseTimeout, int &currTimeout) {
     int recvLen;
 
     // UDP packet
-    if(pollFd[udpFDPOLL].revents == POLLIN) {
+    if(pollFd[udpFDPOLL].revents & POLLIN) {
         recvLen = recvfrom(udpSockFd, incomingUDPMsg, MAX_UDP_MSG_LEN, 0,
             (struct sockaddr*)&udpClientAddr, &udpClientAddrLen);
 
@@ -762,7 +736,7 @@ void checkUDPPort(int baseTimeout, int &currTimeout) {
 
                         // Try to initiate tcp connection with host
                         dprint("%s\n", clientMap.begin()->first.c_str());
-                        // connectToClient(clientMap.begin()->first);
+                        connectToClient(clientMap.begin()->first);
                     }
                     break;
                 }
@@ -797,10 +771,15 @@ void checkConnections()
 {
 	for(auto it = pollFd.begin() + 3; it != pollFd.end();) {
         // dprint("Checking %d at %d\n", i, pollFd[i].fd);
-    	if(it->revents == POLLIN) {
+    	if(it->revents & POLLIN) {
             dprint("%d has something, size %d\n", it->fd, pollFd.size());
     		uint8_t incomingTCPMsg[518];
-    		int recvLen = read(it->fd, incomingTCPMsg, 518);
+            int recvLen, j = 0;
+
+            do {
+                recvLen = read(it->fd, incomingTCPMsg + j, 1);
+                j++;
+            } while(recvLen != 0);
 
             dump(std::string((char*)incomingTCPMsg));
 
@@ -865,16 +844,19 @@ void checkConnections()
                     }
     				case ACCEPT_COMM: {
                         dprint("Connected to user %s\n", tcpConnMap.find(it->fd)->second.c_str());
-
-                        uint8_t ECM[8];
+                        // std::string str = "I promised to look after a friends cat for the week. My place has a glass atrium that goes through two levels, I have put the cat in there with enough food and water to last the week. I am looking forward to the end of the week. It is just sitting there glaring at me, it doesn't do anything else. I can tell it would like to kill me. If I knew I could get a perfect replacement cat, I would kill this one now and replace it Friday afternoon. As we sit here glaring at each other I have already worked out several ways to kill it. The simplest would be to drop heavy items on it from the upstairs bedroom though I have enough basic engineering knowledge to assume that I could build some form of 'spear like' projectile device from parts in the downstairs shed. If the atrium was waterproof, the most entertaining would be to flood it with water. It wouldn't have to be that deep, just deeper than the cat. I don't know how long cats can swim but I doubt it would be for a whole week. If it kept the swimming up for too long I could always try dropping things on it as well. I have read that drowning is one of the most peaceful ways to die so really it would be a win win situation for me and the cat I think.";
+                        std::string str = "yo";
+                        uint8_t ECM[6 + str.length() + 1];
                         int ECMLen = 8;
+                        memset(ECM, 0, 6 + str.length() + 1);
+
                         memcpy(ECM, "P2PI", 4);
                         *((uint16_t*)ECM + 2) = htons(DATA);
-                        memcpy(ECM + 6, "a\0", 2);
+                        memcpy(ECM + 6, str.c_str(), str.length());
                         dprint("Sending...\n", 0);
-                        // if(write(it->fd, ECM, 8) < 0) {
-                        //     die("Failed to send data.");
-                        // }
+                        if(write(it->fd, ECM, 6 + str.length() + 1) < 0) {
+                            die("Failed to send data.");
+                        }
 
     					break;
     				}
@@ -894,9 +876,8 @@ void checkConnections()
     					break;
     				}
     				case DATA: {
-                        char buffer[512];
-                        memcpy(buffer, incomingTCPMsg + 6, recvLen);
-                        dprint("Message is %s\n", buffer);
+						dprint("User %s message.\n", tcpConnMap.find(it->fd)->second.c_str());
+						printf("%s\n",incomingTCPMsg+6);
     					break;
     				}
     				case DISCONTINUE_COMM: {
@@ -918,4 +899,88 @@ void checkConnections()
     }
 }
 
+void checkSTDIN()
+{
+	if(pollFd[terminalFDPOLL].events == POLLIN) {
+		dprint("hello \n", 0);
+		ioctl(STDOUT_FILENO,TIOCGWINSZ,&size);
+		numcol = size.ws_col; //size of the terminal (column size)
+		int bytesRead = read(STDIN_FILENO, &RX, 4);
+		if (bytesRead < 2)
+		buffer.append((const char*)RX);
+		//dprint("buffer len: %d\n", buffer.length());
+		
+		//dprint("buffer: %c\n", buffer[0]);
+		if(bytesRead == 1) {
+			//printf("%c",buffer[0]);
+			fflush(STDIN_FILENO);
+			
+			if(buffer[0] == '\n') { //send message
+			
+				//echos current message onto terminal
+				printf("\r%s>%s\n",userName.c_str(), message.c_str());
+				//TODO: Actually proccess message
+				
+				
+				
+				std::string firstWord= message.substr(0, message.find_first_of(" ",0)); 
+				if(commandMap.find(firstWord) != commandMap.end())
+				{
+					switch(commandMap[firstWord])
+					{
+						case HELP:
+							printf("List of Commands:\n\connect username \n\t- sets user to forward message to\n\disconnect username \n\t- ends communation with user\ngetlist username\n\t- gets the list of users from another user \nlist \n\t- gets your current userlist\nhelp");
+							break;
+					}
+				}
+				else if(currentConnection != 0)
+					sendDataMessage(message);
+				else
+					printf("No connection established, to connect use: \\connect Username");
+				message.clear();
+				
+				printf("\n\033[1B"); //prints down key.
+				
+				
+				
+			}
+			else if(buffer[0] == 0x7F) { //delete char
+				if(message.length() > 0) {
+					message.erase(message.length()-1);
+					printf("\033[1D  "); //clears current and next char in terminal
+					
+				}
+			}
+			else if(message.length() < 512){
+				message += buffer[0];
+				//eraselines(message.length()/numcol);
+			}
+		}
+		printf("\r\b\b\n");
+		printf("\033[0B>%s ", message.c_str(), message.length());
+		
+		if(message.length()+1 > numcol) //simulate loop
+			printf("\b\r%s", message.substr(message.length()-numcol, numcol).c_str());
+		else
+			printf("\b\r>%s", message.c_str());
+	
+		fflush(STDIN_FILENO);
+		buffer.clear();
+	}
+}
+
+void sendDataMessage(std::string message){
+	uint8_t outgoingTCPMsg[6+513];  //max length data is 512
+	bzero(outgoingTCPMsg, 6+513);
+	uint16_t type = htons((uint16_t)8);
+	memcpy(outgoingTCPMsg, "P2PI", 4);
+	memcpy(outgoingTCPMsg+4, &type, 2);
+	memcpy(outgoingTCPMsg+6, message.c_str(), 512);
+
+	 //currentConnection is the fd that the client wishes to speak to.
+	if(write(currentConnection,outgoingTCPMsg, message.length()+5) < 0)
+		die("Failed to establish TCP connection.");
+		
+	message.clear();
+}
 
