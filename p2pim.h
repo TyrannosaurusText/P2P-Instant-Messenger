@@ -68,3 +68,4 @@ void checkConnections();
 void sendUDPMessage(int type);
 void checkSTDIN();
 void sendDataMessage(std::string Message);
+void generateList();
