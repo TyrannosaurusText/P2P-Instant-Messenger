@@ -882,7 +882,7 @@ void checkSTDIN()
 						case CONNECT:
 						{							
 							std::string target= message.substr(firstWord.length()+1, message.find_first_of(" ",0)); 
-							printf("\nLooking for user: %s\n", target.c_str());
+							printf("Looking for user: %s\n", target.c_str());
 							if(clientMap.find(target) != clientMap.end()) {
 								currentConnection = clientMap[target].tcpSockFd;
 								if(write(currentConnection, "ping", 4) <0)
@@ -890,11 +890,11 @@ void checkSTDIN()
 									//failed to send message
 								}
 								else
-								printf("\nConnected to user: %s\n", target.c_str());
+								printf("Connected to user: %s\n", target.c_str());
 							}
 							else
 							{
-								printf("\nNo user '%s' found. \n", target.c_str());
+								printf("No user '%s' found. \n", target.c_str());
 								
 							}
 						}
@@ -915,7 +915,7 @@ void checkSTDIN()
 				else if(currentConnection != 0)
 					sendDataMessage(message);
 				else
-					printf("\nNo connection established, to connect use: \\connect Username");
+					printf("No connection established, to connect use: \\connect Username\n");
 				message.clear();
 				
 				printf("\n\033[1B"); //prints down key.
