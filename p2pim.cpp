@@ -1,7 +1,5 @@
 #include "p2pim.h"
 
-#define DEBUG 0
-
 #ifdef DEBUG
     #define dprint(string, ...) printf(string,__VA_ARGS__)
 #else
@@ -125,6 +123,13 @@ int main(int argc, char** argv) {
             else
                 currTimeout = minTimeout;
         }
+		//printf("\n");
+		clearline();
+		if(message.length()+1 > numcol) //simulate loop
+			printf("%s", message.substr(message.length()-numcol, numcol).c_str());
+		else
+			printf(">%s", message.c_str());
+		fflush(STDIN_FILENO);
 
 
         // Wait for reply message
@@ -139,9 +144,10 @@ int main(int argc, char** argv) {
 
         // Timeout event
         if(0 == rc) {
-            dprint("\n\033[0ANext iteration at %d\n", currTimeout);
+			clearline();
+            dprint("Next iteration at %d\n", currTimeout);
             if(clientMap.empty()) {
-                dprint("TIMEOUT: ", 0);
+                dprint("TIMEOUT: \n", 0);
 
                 // Double current timeout
                 baseTimeout *= 2;
@@ -304,19 +310,19 @@ void sendUDPMessage(int type) {
 
     std::string userName_a, hostName_a;
     getClientNUserName(outgoingUDPMsg, hostName_a, userName_a);
-    dprint("SEND: %d ", type);
+    dprint("SEND: %d \n", type);
     
     if(type == REPLY) {
-        dprint("\n\033[0ASRC - %s : %d ", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
-        dprint("\n\033[0ADEST - %s : %d\n", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
+        dprint("SRC - %s : %d ", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
+        dprint("DEST - %s : %d\n", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
         if(sendto(udpSockFd, outgoingUDPMsg, outgoingUDPMsgLen, 0, 
             (struct sockaddr*)&udpClientAddr, sizeof(udpClientAddr)) < 0) {
             die("Failed to send unicast message");
         }
     }
     else {
-        dprint("\n\033[0ASRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));            
-        dprint("\n\033[0ADEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), udpServerAddr.sin_port);
+        dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));            
+        dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), udpServerAddr.sin_port);
         if(sendto(udpSockFd, outgoingUDPMsg, outgoingUDPMsgLen, 0, 
             (struct sockaddr*)&udpServerAddr, sizeof(udpServerAddr)) < 0) {
             die("Failed to send broadcast message");
@@ -464,7 +470,7 @@ void parseOptions(int argc, char** argv) {
 
                     int tmpPortNum = std::stoi(tmpPortNumStr);
 
-                    dprint("\n\033[0A%s %d\n", tmpHostName.c_str(), tmpPortNum);
+                    dprint("%s %d\n", tmpHostName.c_str(), tmpPortNum);
 
                     // Check if host is in local subnet
                     // First resolve host's domain name
@@ -543,7 +549,7 @@ void connectToClient(std::string clientName) {
         dprint("%d\n", newConn);
         // close(tmpTCPSock);
 
-        dprint("\n\033[0ACONNECTED TO NEW HOST\n", 0);
+        dprint("CONNECTED TO NEW HOST\n", 0);
 
         // Send ESTABLISH COMMUNICATION MSG
         uint8_t ECM[39];
@@ -630,11 +636,11 @@ void sendTCPMessage(int type, std::string userName) {
 
 void checkTCPPort(std::string newClientName) {
 	if(pollFd[tcpFDPOLL].revents == POLLIN) {
-        dprint("\n\033[0ANEW HOST TRYING TO CONNECT\n", 0);
+        dprint("NEW HOST TRYING TO CONNECT\n", 0);
 
 		int newConn = accept(tcpSockFd, (struct sockaddr*)&tcpClientAddr, &tcpClientAddrLen);
 		
-        dprint("\n\033[0ANEW HOST CONNECTED at %d\n", newConn);
+        dprint("NEW HOST CONNECTED at %d\n", newConn);
 
 		uint8_t incomingTCPMsg[518];
 		int recvLen = read(newConn, incomingTCPMsg, 518);
@@ -645,9 +651,9 @@ void checkTCPPort(std::string newClientName) {
 			int ECMLen = 6;
 			memcpy(ECM, "P2PI", 4);
 			
-            dprint("\n\033[0ANew Client Name is %s\n", newClientName.c_str());
+            dprint("New Client Name is %s\n", newClientName.c_str());
             if(clientMap.find(newClientName) == clientMap.end()) {
-                dprint("\n\033[0AWHO?\n", 0);
+                dprint("WHO?\n", 0);
             }
 
 			if(away || clientMap.find(newClientName)->second.block) {
@@ -663,7 +669,7 @@ void checkTCPPort(std::string newClientName) {
 			}
 			else {
 				// Send accept comm message
-                dprint("\n\033[0AGOOD\n", 0);
+                dprint("GOOD\n", 0);
 				*((uint16_t*)ECM + 2) = htons(ACCEPT_COMM);
 
 				clientMap.find(newClientName)->second.tcpSockFd = newConn;
@@ -701,9 +707,9 @@ void checkUDPPort(int baseTimeout, int &currTimeout) {
         if(recvLen > 0) {
             int type = getType(incomingUDPMsg);
 
-            dprint("\n\033[0ARECV: %d ", type);
-            dprint("\n\033[0ASRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
-            dprint("\n\033[0ADEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
+            dprint("RECV: %d ", type);
+            dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
+            dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
 
             // for(int i = 0; i < recvLen; i++)
             // {
@@ -721,7 +727,7 @@ void checkUDPPort(int baseTimeout, int &currTimeout) {
                         if(findClient(incomingUDPMsg) == clientMap.end()) {
                             std::string userName_a, hostName_a;
                             getClientNUserName(incomingUDPMsg, hostName_a, userName_a);
-                            dprint("\n\033[0A-----NEW HOST: %s-----\n", userName_a.c_str());
+                            dprint("-----NEW HOST: %s-----\n", userName_a.c_str());
                             
                             addNewClient(incomingUDPMsg);
                         }
@@ -730,7 +736,7 @@ void checkUDPPort(int baseTimeout, int &currTimeout) {
                         sendUDPMessage(REPLY);
                     }
                     else
-                        dprint("\n\033[0A-----SELF DISCOVERY-----\n", 0);
+                        dprint("-----SELF DISCOVERY-----\n", 0);
 
                     break;
                 }
@@ -740,11 +746,11 @@ void checkUDPPort(int baseTimeout, int &currTimeout) {
                     if(findClient(incomingUDPMsg) == clientMap.end()) {
                         std::string userName_a, hostName_a;
                         getClientNUserName(incomingUDPMsg, hostName_a, userName_a);
-                        dprint("\n\033[0A-----NEW HOST: %s-----\n", userName_a.c_str());
+                        dprint("-----NEW HOST: %s-----\n", userName_a.c_str());
                         addNewClient(incomingUDPMsg);
 
                         // Try to initiate tcp connection with host
-                        dprint("\n\033[0A%s\n", clientMap.begin()->first.c_str());
+                        dprint("%s\n", clientMap.begin()->first.c_str());
                         connectToClient(clientMap.begin()->first);
                     }
                     break;
@@ -781,25 +787,26 @@ void checkConnections()
 	for(auto it = pollFd.begin() + 3; it != pollFd.end();) {
         // dprint("Checking %d at %d\n", i, pollFd[i].fd);
     	if(it->revents == POLLIN) {
-            dprint("\n\033[0A%d has something, size %d\n", it->fd, pollFd.size());
+            dprint("%d has something, size %d\n", it->fd, pollFd.size());
     		uint8_t incomingTCPMsg[518];
+			bzero(incomingTCPMsg, 518);
     		int recvLen = read(it->fd, incomingTCPMsg, 518);
 
     		if(recvLen > 0) {
     			int type = getType(incomingTCPMsg);
 
-    			dprint("\n\033[0ARECV: %d\n", type);
+    			dprint("RECV: %d\n", type);
     			// dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
     			// dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
 
     			switch(type) {
     				case ACCEPT_COMM: {
-                        dprint("\n\033[0AConnected to user %s\n", tcpConnMap.find(it->fd)->second.c_str());
+                        dprint("Connected to user %s\n", tcpConnMap.find(it->fd)->second.c_str());
     					break;
     				}
     				case USER_UNAVALIBLE: {
     					// Close connection as well
-                        dprint("\n\033[0AThe user %s is currently unavailable\n", tcpConnMap.find(it->fd)->second.c_str());
+                        dprint("The user %s is currently unavailable\n", tcpConnMap.find(it->fd)->second.c_str());
     					close(it->fd);
     					it = pollFd.erase(it);
                         continue;
@@ -811,9 +818,10 @@ void checkConnections()
     					break;
     				}
     				case DATA: {
-						dprint("\n\033[0AUser %s message.\n", tcpConnMap.find(it->fd)->second.c_str());
-						printf("\n\033[0A%s\n",incomingTCPMsg+6);
-    					break;
+						dprint("User %s message. Bytes receieved : %d.\n", tcpConnMap.find(it->fd)->second.c_str(), recvLen);
+						clearline();
+						printf("%s>%s\n", tcpConnMap.find(it->fd)->second.c_str(), incomingTCPMsg+6);
+						break;
     				}
     				case DISCONTINUE_COMM: {
                         dprint("User %s wants to discontinue communication.\n", tcpConnMap.find(it->fd)->second.c_str());
@@ -836,13 +844,6 @@ void checkConnections()
 
 void checkSTDIN()
 {
-	
-	if(message.length()+1 > numcol) //simulate loop
-			printf("\033[0B\r%s", message.substr(message.length()-numcol, numcol).c_str());
-		else
-			printf("\033[0B\r>%s", message.c_str());
-	fflush(STDIN_FILENO);
-	
 	if(pollFd[terminalFDPOLL].revents & POLLIN) {
 		//dprint("hello \n", 0);
 		ioctl(STDOUT_FILENO,TIOCGWINSZ,&size);
@@ -856,10 +857,19 @@ void checkSTDIN()
 			//printf("%c",buffer[0]);
 			fflush(STDIN_FILENO);
 			
+			if(buffer[0] == 0x7F) { //delete char
+				if(message.length() > 0) {
+					message.erase(message.length()-1);
+					printf("\033[1D  "); //clears current and next char in terminal
+					
+				}
+			}
+			else if(message.length() < 516 && buffer[0] != '\n')
+				message += buffer[0];
 			if(buffer[0] == '\n') { //send message
 			
 				//echos current message onto terminal
-				printf("\r%s>%s\n",userName.c_str(), message.c_str());
+				printf("\r%s>%s",userName.c_str(), message.c_str());
 				//TODO: Actually proccess message
 				
 				
@@ -869,20 +879,43 @@ void checkSTDIN()
 				{
 					switch(commandMap[firstWord])
 					{
+						case CONNECT:
+						{							
+							std::string target= message.substr(firstWord.length()+1, message.find_first_of(" ",0)); 
+							printf("\nLooking for user: %s\n", target.c_str());
+							if(clientMap.find(target) != clientMap.end()) {
+								currentConnection = clientMap[target].tcpSockFd;
+								if(write(currentConnection, "ping", 4) <0)
+								{
+									//failed to send message
+								}
+								else
+								printf("\nConnected to user: %s\n", target.c_str());
+							}
+							else
+							{
+								printf("\nNo user '%s' found. \n", target.c_str());
+								
+							}
+						}
+							break;
 						case LIST:
+						{
 							generateList();
-							
-							printf("\n\033[0A%s\n", list.c_str());
+							printf("%s\n", list.c_str());
+						}
 							break;
 						case HELP:
-							printf("\n\033[0AList of Commands:\nconnect username \n\t- sets user to forward message to\n\disconnect username \n\t- ends communation with user\ngetlist username\n\t- gets the list of users from another user \nlist \n\t- gets your current userlist\nhelp");
+						{
+							printf("\nList of Commands:\nconnect username \n\t- sets user to forward message to\n\disconnect username \n\t- ends communation with user\ngetlist username\n\t- gets the list of users from another user \nlist \n\t- gets your current userlist\nhelp");
+						}
 							break;
 					}
 				}
 				else if(currentConnection != 0)
 					sendDataMessage(message);
 				else
-					printf("No connection established, to connect use: \\connect Username");
+					printf("\nNo connection established, to connect use: \\connect Username");
 				message.clear();
 				
 				printf("\n\033[1B"); //prints down key.
@@ -890,26 +923,15 @@ void checkSTDIN()
 				
 				
 			}
-			else if(buffer[0] == 0x7F) { //delete char
-				if(message.length() > 0) {
-					message.erase(message.length()-1);
-					printf("\033[1D  "); //clears current and next char in terminal
-					
-				}
-			}
-			else if(message.length() < 512){
-				message += buffer[0];
 				//eraselines(message.length()/numcol);
-			}
+			
 		}
-		printf("\r\b\b\n");
-		printf("\033[0B>%s ", message.c_str(), message.length());
-		
+		clearline();
 		if(message.length()+1 > numcol) //simulate loop
-			printf("\b\r%s", message.substr(message.length()-numcol, numcol).c_str());
+			printf("%s", message.substr(message.length()-numcol, numcol).c_str());
 		else
-			printf("\b\r>%s", message.c_str());
-	
+			printf(">%s", message.c_str());
+		//printf("\033[0C");
 		fflush(STDIN_FILENO);
 		buffer.clear();
 	}
@@ -918,18 +940,18 @@ void checkSTDIN()
 void sendDataMessage(std::string message){
 	uint8_t outgoingTCPMsg[6+513];  //max length data is 512
 	bzero(outgoingTCPMsg, 6+513);
-	uint16_t type = htons((uint16_t)8);
+	uint16_t type = htons((uint16_t)9);
 	memcpy(outgoingTCPMsg, "P2PI", 4);
 	memcpy(outgoingTCPMsg+4, &type, 2);
+	dprint("\nmessage to send: %s\n", message.c_str());
 	memcpy(outgoingTCPMsg+6, message.c_str(), 512);
 
 	 //currentConnection is the fd that the client wishes to speak to.
-	if(write(currentConnection,outgoingTCPMsg, message.length()+5) < 0)
+	if(write(currentConnection,outgoingTCPMsg, message.length()+6) < 0)
 		die("Failed to establish TCP connection.");
 		
 	message.clear();
-}
-
+} 
 
 void generateList()
 {
@@ -950,8 +972,18 @@ void generateList()
 		list.append(" , TCP "); 
 		list.append(std::to_string(i.second.tcpPort));
 		list.append("\n");  
+		c++;
 	}
 }
 
-
-
+void clearline()
+{
+	printf("\r");
+	ioctl(STDOUT_FILENO,TIOCGWINSZ,&size);
+	int COLS = size.ws_col;
+	
+	char str[COLS+1];
+	bzero(str, COLS+1);
+	memset(str, ' ', COLS-2);
+	printf("%s\r",str);
+}
