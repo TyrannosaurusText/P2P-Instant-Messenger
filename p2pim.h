@@ -64,7 +64,7 @@ void parseOptions(int argc, char** argv);
 void initUDPMsg();
 void addNewClient(uint8_t* replyMsg);
 void setupSocket();
-void checkUDPPort(int baseTimeout, int &currTimeout);
+void checkUDPPort(int &baseTimeout, int &currTimeout);
 void checkTCPPort(std::string newClientName);
 void checkConnections();
 void sendUDPMessage(int type);
