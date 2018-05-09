@@ -51,7 +51,6 @@ int udpPort = 50550;
 int tcpPort = 50551;
 int minTimeout = 5000;
 int maxTimeout = 60000;
-// int destPort = ls
 std::string optErr;
 struct in_addr tmpIPAddr, tmpMask;
 
@@ -64,7 +63,6 @@ std::unordered_map<int, std::string> tcpConnMap;
 int udpSockFd, tcpSockFd, enable = 1;
 struct sockaddr_in udpServerAddr, udpClientAddr, tcpServerAddr, tcpClientAddr;
 socklen_t udpClientAddrLen, tcpClientAddrLen;
-// struct pollfd pollFd[2];
 std::vector<struct pollfd> pollFd(3);
 
 std::vector<struct Host> unicastHosts;
@@ -87,18 +85,9 @@ int main(int argc, char** argv) {
     if(signal(SIGINT, SIGINT_handler) == SIG_ERR)
         die("Failed to catch signal");
 
-    // findIPNMask();
     parseOptions(argc, argv);
     initUDPMsg();
     setupSocket();
-
-    // dprint("Username = %s\n", userName.c_str());
-    // // TODO: Clientname = sp4.cs.ucdavis.edu
-    // dprint("Clientname = %s\n", hostName.c_str());
-    // dprint("UDP Port = %d\n", udpPort);
-    // dprint("TCP Port = %d\n", tcpPort);
-    // dprint("Mintimeout = %d\n", minTimeout);
-    // dprint("Maxtimeout = %d\n", maxTimeout);
 
 	struct termios SavedTermAttributes;
 
@@ -123,7 +112,6 @@ int main(int argc, char** argv) {
         if(currTimeout <= 0) {
             if(clientMap.empty()) {
                 if(!unicastHosts.empty()) {
-                    dprint("size is %d\n", unicastHosts.size());
                     for(auto h : unicastHosts) {
                         // Resolve dns
                         struct hostent* remoteHostEntry = gethostbyname(h.hostName.c_str());
@@ -132,23 +120,11 @@ int main(int argc, char** argv) {
                         }
 
                         struct in_addr remoteAddr;
-                        // char buf[256];
-
                         memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
-                        // inet_ntop(AF_INET, &remoteAddr, buf, INET_ADDRSTRLEN);
 
-                        // struct sockaddr_in addr2Send;
-                        // addr2Send.sin_addr = htonl(remoteAddr.sin_addr);
-                        // addr2Send.sin_port = htons(h.portNum);
-                        // addr2Send.sa_family = AF_INET;
                         udpServerAddr.sin_addr = remoteAddr;
                         udpServerAddr.sin_port = htons(h.portNum);
-                        // addr2Send.sa_family = AF_INET;
-
-                        // sendUDPMessage(DISCOVERY);
                     }
-
-                    // unicastHosts.clear();
                 }
                 else {
                     udpServerAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
@@ -165,13 +141,6 @@ int main(int argc, char** argv) {
 
         // Wait for reply message
         gettimeofday(&start, NULL);
-        //TODO: there is a potential bug, where currTimeout is set to 0 and poll returns immediately
-		/* for( auto i : pollFd)
-		{
-			dprint("%d\n", i.fd);
-		} */
-
-        dprint("Curr timeout is %d\n", currTimeout);
         int rc = poll(pollFd.data(), pollFd.size(), currTimeout);
         gettimeofday(&end, NULL);
         timePassed = ((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec) / 1000;
@@ -179,7 +148,6 @@ int main(int argc, char** argv) {
 
         // Timeout event
         if(0 == rc) {
-            dprint("Next iteration at %d\n", currTimeout);
             if(clientMap.empty()) {
                 dprint("TIMEOUT: ", 0);
 
@@ -189,33 +157,19 @@ int main(int argc, char** argv) {
             }
         }
         else if(rc > 0) {
-            dprint("map size is %d\n", clientMap.size());
-            // dprint("Something is available\n", 0);
             std::string newClientName, newUserName;
             checkSTDIN();
-
             checkUDPPort(baseTimeout, currTimeout);
-
-            dprint("basetimeout after checking %d\n", baseTimeout);
-
             // new TCP connection
 			checkTCPPort(newClientName);
-
             // TCP packet
 			checkConnections();
-
-
         }
         else
             dprint("ERROR\n", 0);
     }
 
-
-
-
-
     ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
-
 
     return 0;
 }
@@ -233,12 +187,6 @@ void optionError(char** argv){
     exit(1);
 }
 
-
-// void findIPNMask() {
-//     char buf[256];
-
-
-// }
 void getClientName()
 {
     char buffer[256];
@@ -253,18 +201,13 @@ void getClientName()
         die("Unable to resolve local host.");
     }
 
-    // struct in_addr tmpIPAddr, tmpMask;
     int found = 0;
-
+    struct ifaddrs *currentIFAddr, *firstIFAddr;
     hostName = localHostEntry->h_name;
-
     memcpy(&tmpIPAddr, localHostEntry->h_addr, localHostEntry->h_length);
 
-    struct ifaddrs *currentIFAddr, *firstIFAddr;
-
-    if(0 > getifaddrs(&firstIFAddr)) {
+    if(0 > getifaddrs(&firstIFAddr))
         die("Failed to get ifaddr.");
-    }
 
     currentIFAddr = firstIFAddr;
 
@@ -276,7 +219,6 @@ void getClientName()
                 break;
             }
         }
-
         currentIFAddr = currentIFAddr->ifa_next;
     } while(currentIFAddr);
 
@@ -387,38 +329,27 @@ void SetNonCanonicalMode(int fd, struct termios *savedattributes) {
 // Handler for SIGINT signal
 void SIGINT_handler(int signum) {
     if(signum == SIGINT) {
-        // std::string input;
+        for(auto it : clientMap) {
+            if(it.second.tcpSockFd != -1) {
 
-        // Prompt users before terminating
-        // std::cout << "Do you want to terminate? ";
-        // std::getline(std::cin, input);
+                uint8_t outgoingTCPMsg[6];
+                memcpy(outgoingTCPMsg, "P2PI", 4);
+                *((uint16_t*)outgoingTCPMsg + 2) = htons(DISCONTINUE_COMM);
 
-        // if(input[0] == 'y'){
-            // Shutdown socket before exiting
-
-            // Close all tcp connections
-            for(auto it : clientMap) {
-                if(it.second.tcpSockFd != -1) {
-
-                    uint8_t outgoingTCPMsg[6];
-                    memcpy(outgoingTCPMsg, "P2PI", 4);
-                    *((uint16_t*)outgoingTCPMsg + 2) = htons(DISCONTINUE_COMM);
-
-                    if(write(it.second.tcpSockFd, outgoingTCPMsg, 6) < 0) {
-                        die("Failed to send TCP message");
-                    }
-
-                    close(it.second.tcpSockFd);
+                if(write(it.second.tcpSockFd, outgoingTCPMsg, 6) < 0) {
+                    die("Failed to send TCP message");
                 }
+
+                close(it.second.tcpSockFd);
             }
+        }
 
-            sendUDPMessage(CLOSING);
+        sendUDPMessage(CLOSING);
 
 
-            shutdown(tcpSockFd, 0);
-            shutdown(udpSockFd, 0);
-            exit(0);
-        // }
+        shutdown(tcpSockFd, 0);
+        shutdown(udpSockFd, 0);
+        exit(0);
     }
 }
 
@@ -483,7 +414,6 @@ void parseOptions(int argc, char** argv) {
                 }
                 // TODO:
                 case HOST: {
-                    // optionMap[argv[i]] = -1;
                     std::string tmpArgv = argv[i + 1];
 
                     // Parse hostname part and port num part
@@ -513,15 +443,10 @@ void parseOptions(int argc, char** argv) {
                     struct ifaddrs *currentIFAddr, *firstIFAddr;
 
                     memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
-                    // dprint("%s\n", std::string(remoteHostEntry->h_addr).c_str());
                     inet_ntop(AF_INET, &remoteAddr, buf, INET_ADDRSTRLEN);
-                    // dprint("%s\n", buf);
-                    // dprint("%lu\n", remoteAddr.s_addr & tmpMask.s_addr);
-                    // dprint("%lu\n", tmpIPAddr.s_addr & tmpMask.s_addr);
 
                     // TODO:
                     if((remoteAddr.s_addr & tmpMask.s_addr) != (tmpIPAddr.s_addr & tmpMask.s_addr)) {
-                        // dprint("Same subnet\n", 0);
                         struct Host newUnicastHost;
                         newUnicastHost.hostName = tmpHostName;
                         newUnicastHost.portNum = tmpPortNum;
@@ -529,9 +454,6 @@ void parseOptions(int argc, char** argv) {
                         unicastHosts.push_back(newUnicastHost);
                     }
 
-                    // dprint("%s", inet_ntoa(remoteHostEntry->h_addr));
-                    // dprint("%s", remoteHostEntry->h_addr);
-                    // minTimeout = atoi(argv[i + 1]);
                     break;
                 }
                 default: {
@@ -556,7 +478,6 @@ void initUDPMsg() {
         userName.length());
 }
 
-// void addNewClient(uint8_t* incomingUDPMsg, int fd) {
 void addNewClient(uint8_t* incomingUDPMsg) {
     struct Client newClient;
     getClientNUserName(incomingUDPMsg, newClient.hostName, newClient.userName);
@@ -580,15 +501,8 @@ void connectToClient(std::string clientName) {
         }
 
         struct in_addr remoteAddr;
-        // char buf[256];
-
         memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
-        // inet_ntop(AF_INET, &remoteAddr, buf, INET_ADDRSTRLEN);
 
-        // struct sockaddr_in addr2Send;
-        // addr2Send.sin_addr = htonl(remoteAddr.sin_addr);
-        // addr2Send.sin_port = htons(h.portNum);
-        // addr2Send.sa_family = AF_INET;
         it->second.tcpClientAddr.sin_addr = remoteAddr;
         it->second.tcpClientAddr.sin_port = htons(it->second.tcpPort);
 
@@ -598,15 +512,11 @@ void connectToClient(std::string clientName) {
         if(0 > connect(newConn, (struct sockaddr *)&client2ConnetAddr, sizeof(client2ConnetAddr)))
             die("Failed to connect to host.");
 
-        dprint("%d\n", newConn);
-        // close(tmpTCPSock);
-
         dprint("CONNECTED TO NEW HOST\n", 0);
 
         // Send ESTABLISH COMMUNICATION MSG
         uint8_t ECM[39];
         int ECMLen = 4 + 2 + userName.length() + 1;
-        // int ECMLen = 4 + 2;
 
         memset(ECM, 0, ECMLen);
         memcpy(ECM, "P2PI", 4);
@@ -704,7 +614,6 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
      // Reply message
     uint8_t incomingUDPMsg[MAX_UDP_MSG_LEN];
     udpClientAddrLen = sizeof(udpClientAddr);
-    // udpClientAddr.sin_addr.s_addr = htonl(INADDR_ANY);
     int recvLen;
 
     // UDP packet
@@ -718,11 +627,6 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
             dprint("RECV: %d ", type);
             dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
             dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
-
-            // for(int i = 0; i < recvLen; i++)
-            // {
-            //     dprint("%c", incomingUDPMsg[i]);
-            // }
 
             switch (type) {
                 case DISCOVERY: {
@@ -768,13 +672,8 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     // Remove host from map
                     std::unordered_map<std::string, struct Client>::iterator it = findClient(incomingUDPMsg);
 
-                    if(it != clientMap.end()) {
-                        // if(it->second.tcpSockFd != -1) {
-                            // dprint("CLOSING connection\n", 0);
-                            // close(it->second.tcpSockFd);
-                    //     }
+                    if(it != clientMap.end())
                         clientMap.erase(it);
-                    }
 
                     // If no more host is available, go back to discovery
                     if(clientMap.empty()) {
@@ -802,315 +701,267 @@ void checkConnections()
     		uint8_t incomingTCPMsg[518];
             int recvLen, j = 0;
 
-            // fcntl(it->fd, F_SETFL, (fcntl(it->fd, F_GETFL) | O_NONBLOCK));
-
             do {
                 recvLen = read(it->fd, incomingTCPMsg + j, 1);
-                // dprint("recvLen is %d\n", recvLen);
-                // dprint("%s\n", incomingTCPMsg);
-
                 j++;
             } while(j < 6);
 
-            // dataBuffer += (char*)incomingTCPMsg;
+			int type = getType(incomingTCPMsg);
 
-            // dprint("dataBuffer is %s\n", dataBuffer.c_str());
+			dprint("RECV: %d\n", type);
+			dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
+			dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
 
-            // recvLen = dataBuffer.length();
+			switch(type) {
+                case ESTABLISH_COMM: {
+                    int j = 0, recvLen;
+                    char newClientNameArr[32];
+                    do {
+                        recvLen = read(it->fd, newClientNameArr + j, 1);
+                        if(newClientNameArr[j] == 0)
+                            break;
+                        j++;
+                    } while(1);
 
+                    std::string newClientName = newClientNameArr;
 
+                    uint8_t ECM[6];
+                    int ECMLen = 6;
+                    memcpy(ECM, "P2PI", 4);
 
-            // dump(std::string((char*)incomingTCPMsg));
-
-    		// if(j > 0) {
-    			int type = getType(incomingTCPMsg);
-
-    			dprint("RECV: %d\n", type);
-    			// dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
-    			// dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
-
-    			switch(type) {
-                    case ESTABLISH_COMM: {
-                        // uint8_t incomingTCPMsg[518];
-                        // int recvLen = read(newConn, incomingTCPMsg, 518);
-
-                        // if(recvLen > 0 && getType(incomingTCPMsg) == ESTABLISH_COMM) {
-                        // dprint("ESTABLISH_COM length is %d\n", recvLen);
-                        int j = 0, recvLen;
-                        char newClientNameArr[32];
-                        do {
-                            recvLen = read(it->fd, newClientNameArr + j, 1);
-                            // dprint("recvLen is %d\n", recvLen);
-                            // dprint("%s\n", incomingTCPMsg);
-
-                            j++;
-                        } while(newClientNameArr[j - 1] != 0);
-
-                        std::string newClientName = newClientNameArr;
-
-                        // std::string newClientName = (char*)((uint16_t*)incomingTCPMsg + 3);
-                        uint8_t ECM[6];
-                        int ECMLen = 6;
-                        memcpy(ECM, "P2PI", 4);
-
-                        dprint("New Client Name is %s\n", newClientName.c_str());
-                        if(clientMap.find(newClientName) == clientMap.end()) {
-                            dprint("WHO?\n", 0);
-                        }
-
-                        if(away || clientMap.find(newClientName)->second.block) {
-                            // Send user unavailable message
-                            *((uint16_t*)ECM + 2) = htons(USER_UNAVALIBLE);
-
-                            if(write(it->fd, ECM, 6) < 0) {
-                                die("Failed to establish TCP connection.");
-                            }
-
-                            // Close connection
-                            close(it->fd);
-                            it = pollFd.erase(it);
-                        }
-                        else {
-                            // Send accept comm message
-                            dprint("GOOD\n", 0);
-                            *((uint16_t*)ECM + 2) = htons(ACCEPT_COMM);
-
-                            clientMap.find(newClientName)->second.tcpSockFd = it->fd;
-
-                            tcpConnMap[it->fd] = newClientName;
-
-                            // Push fd to pollfd vector
-                            // struct pollfd newPollFd;
-                            // newPollFd.fd = newConn;
-                            // newPollFd.events = POLLIN;
-                            // pollFd.push_back(newPollFd);
-
-                            if(write(it->fd, ECM, 6) < 0) {
-                                die("Failed to establish TCP connection.");
-                            }
-                        }
-
-                        break;
-                        // }
+                    dprint("New Client Name is %s\n", newClientName.c_str());
+                    if(clientMap.find(newClientName) == clientMap.end()) {
+                        dprint("WHO?\n", 0);
                     }
-    				case ACCEPT_COMM: {
-                        dprint("Connected to user %s\n", tcpConnMap.find(it->fd)->second.c_str());
-                        // std::string str = "I promised to look after a friends cat for the week. My place has a glass atrium that goes through two levels, I have put the cat in there with enough food and water to last the week. I am looking forward to the end of the week. It is just sitting there glaring at me, it doesn't do anything else. I can tell it would like to kill me. If I knew I could get a perfect replacement cat, I would kill this one now and replace it Friday afternoon. As we sit here glaring at each other I have already worked out several ways to kill it. The simplest would be to drop heavy items on it from the upstairs bedroom though I have enough basic engineering knowledge to assume that I could build some form of 'spear like' projectile device from parts in the downstairs shed. If the atrium was waterproof, the most entertaining would be to flood it with water. It wouldn't have to be that deep, just deeper than the cat. I don't know how long cats can swim but I doubt it would be for a whole week. If it kept the swimming up for too long I could always try dropping things on it as well. I have read that drowning is one of the most peaceful ways to die so really it would be a win win situation for me and the cat I think.";
-                        // std::string str = "yo";
-                        // uint8_t ECM[6 + str.length() + 1];
-                        // int ECMLen = 6 + str.length() + 1;
-                        // memset(ECM, 0, 6 + str.length() + 1);
 
-                        // memcpy(ECM, "P2PI", 4);
-                        // *((uint16_t*)ECM + 2) = htons(DATA);
-                        // memcpy(ECM + 6, str.c_str(), str.length());
-                        // dprint("Sending...%s\n", strlen(str.c_str()));
-                        // int nbytes = write(it->fd, ECM, 6 + str.length() + 1);
-                        // if(nbytes < 0) {
-                        //     die("Failed to send data.");
-                        // }
-                        // // currentConnection = it->fd;
-                        // // sendDataMessage(str);
-                        uint8_t ECM[6];
-                        memcpy(ECM, "P2PI", 4);
-                        *((uint16_t*)ECM + 2) = htons(REQUEST_USER_LIST);
+                    if(away || clientMap.find(newClientName)->second.block) {
+                        // Send user unavailable message
+                        *((uint16_t*)ECM + 2) = htons(USER_UNAVALIBLE);
 
-                        if(0 > write(it->fd, ECM, 6))
-                            die("Failed to send data");
-                        // dprint("nbytes is %d or %d\n", nbytes, str.length());
-
-    					break;
-    				}
-    				case USER_UNAVALIBLE: {
-    					// Close connection as well
-                        dprint("The user %s is currently unavailable\n", tcpConnMap.find(it->fd)->second.c_str());
-    					close(it->fd);
-    					it = pollFd.erase(it);
-                        continue;
-    				}
-    				case REQUEST_USER_LIST: {
-                        dprint("hi\n",0);
-                        uint8_t ECM[10];
-                        memcpy(ECM, "P2PI", 4);
-                        *((uint16_t*)ECM + 2) = htons(REPLY_USER_LIST);
-                        *((uint32_t*)((uint16_t*)ECM + 3)) = htons(clientMap.size());
-
-                        if(0 > write(it->fd, ECM, 10))
-                            die("Failed to send user list reply");
-
-                        uint8_t userEntry[8 + 256 + 32 + 2];
-                        int i = 0;
-                        for(auto c : clientMap) {
-                            memset(userEntry, 0, 8 + 256 + 32 + 2);
-                            *((uint32_t*)userEntry) = htons(i);
-                            *((uint16_t*)userEntry + 2) = htons(c.second.udpPort);
-                            memcpy(userEntry + 6, c.second.hostName.c_str(), c.second.hostName.length());
-                            // *(userEntry + 6 + c.second.hostName.length() + 1) = 0;
-                            *((uint16_t*)(userEntry + 6 + c.second.hostName.length() + 1)) = htons(c.second.tcpPort);
-                            dprint("tcp should be %d\n", ntohs(*((uint16_t*)(userEntry + 6 + c.second.hostName.length() + 1))));
-                            dprint("len is %d\n", 6 + c.second.hostName.length() + 1);
-                            dprint("hostname is %s\n", (userEntry + 6));
-                            memcpy(userEntry + 6 + c.second.hostName.length() + 1 + 2, c.second.userName.c_str(), c.second.userName.length());
-                            dprint("username is %s\n", (userEntry + 6 + c.second.hostName.length() + 1 + 2));
-
-                            // *(userEntry + 6 + c.second.hostName.length() + 2 + 2 + c.second.userName.length() + 2) = 0;
-                            i++;
-
-                            // for(int l = 0; l < 6 + c.second.hostName.length() + 2 + 2 + c.second.userName.length() + 2; l++) {
-                            //     dprint("%c ", userEntry + l);
-                            // }
-                            // dprint("\n", 0);
-
-                            if(0 > write(it->fd, userEntry, 6 + c.second.hostName.length() + 2 + 1 + c.second.userName.length() + 1))
-                                die("Failed to send user list entry");
+                        if(write(it->fd, ECM, 6) < 0) {
+                            die("Failed to establish TCP connection.");
                         }
 
-    					break;
-    				}
-    				case REPLY_USER_LIST: {
-                        // Get the entry count
-                        dprint("hi\n", 0);
-                        int j = 0, recvLen;
-                        uint8_t entryCountArr[5];
-                        memset(entryCountArr, 0, 5);
-                        do {
-                            recvLen = read(it->fd, entryCountArr + j, 1);
-                            // dprint("recvLen is %d\n", recvLen);
-                            // dprint("%s\n", incomingTCPMsg);
-
-                            j++;
-                        } while(j < 4);
-
-                        int entryCount = ntohs(*(uint32_t*)entryCountArr);
-
-                        dprint("Entry count is %d", entryCount);
-
-                        uint8_t entryArr[8 + 256 + 32 + 2];
-                        for(int k = 0; k < entryCount; k++) {
-
-                            int n = 0;
-                            // get entry number
-                            do {
-                                recvLen = read(it->fd, entryArr + n, 1);
-                                n++;
-                            } while(n < 4);
-
-                            int entryNum = ntohs(*(uint32_t*)entryArr);
-                            dprint("entry num is %d\n", entryNum);
-
-                            struct Client newClient;
-                            n = 0;
-                            // get udp port
-                            do {
-                                recvLen = read(it->fd, entryArr + 4 + n, 1);
-                                n++;
-                            } while(n < 2);
-
-                            newClient.udpPort = ntohs(*((uint16_t*)entryArr + 2));
-                            dprint("udpPort is %d\n", newClient.udpPort);
-
-                            n = 0;
-                            // get hostname
-                            do {
-                                recvLen = read(it->fd, entryArr + 6 + n, 1);
-                                dprint("%d %c\n", n, *(char*)(entryArr + 6 + n));
-                                if(entryArr[6 + n] == 0)
-                                    break;
-                                n++;
-                            } while(1);
-
-                            newClient.hostName = (char*)(entryArr + 6);
-                            dprint("hostname is %s\n", newClient.hostName.c_str());
-
-
-                            n = 0;
-                            // get tcp port
-                            do {
-                                recvLen = read(it->fd, entryArr + 6 + n + newClient.hostName.length() + 1, 1);
-
-                                n++;
-                            } while(n < 2);
-
-                            newClient.tcpPort = ntohs(*((uint16_t*)(entryArr + 6 + newClient.hostName.length() + 1)));
-                            dprint("tcpPort is %d\n", newClient.tcpPort);
-
-                            n = 0;
-                            // get username
-                            do {
-                                recvLen = read(it->fd, entryArr + 6 + n + newClient.hostName.length() + 1 + 2, 1);
-                                dprint("%d %c\n", n, *(char*)(entryArr + 6 + n + newClient.hostName.length() + 1 + 2));
-
-                                if(entryArr[6 + n + newClient.hostName.length() + 1 + 2] == 0)
-                                    break;
-                                n++;
-                            } while(1);
-
-                            newClient.userName = (char*)(entryArr + 6 + newClient.hostName.length() + 2 + 1);
-
-                            dprint("username %s, hostname %s, tcp %d, udp %d\n", newClient.userName.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
-
-                            if(clientMap.find(newClient.userName) == clientMap.end()) {
-                                clientMap[newClient.userName] = newClient;
-                            }
-                        }
-
-    					break;
-    				}
-
-                    // TODO: break data into chuncks, it seems that it only sends 512 bytes at a time
-                    // Not sure if it is a limit on the protocol
-    				case DATA: {
-                        // Read in data
-                        int j = 0, recvLen;
-                        std::string dataBuffer = "";
-                        char dataMsg[513];
-
-                        while(1) {
-                            recvLen = read(it->fd, dataMsg + j, 1);
-                            // dprint("recvLen is %d\n", recvLen);
-                            // dprint("%s\n", incomingTCPMsg);
-                            if(dataMsg[j] == '\0')
-                                break;
-
-                            j++;
-
-                            if(j == 512) {
-                                dataMsg[j] = '\0';
-                                dataBuffer += dataMsg;
-                                dprint("current buffer %s\n", dataBuffer.c_str());
-                                j = 0;
-                            }
-
-                        }
-                        dataBuffer += dataMsg;
-
-                        // std::string newClientName = newClientNameArr;
-
-						dprint("User %s message.\n", tcpConnMap.find(it->fd)->second.c_str());
-						printf("%s\n", dataBuffer.c_str());
-    					break;
-    				}
-    				case DISCONTINUE_COMM: {
-                        dprint("User %s wants to discontinue communication.\n", tcpConnMap.find(it->fd)->second.c_str());
-                        dprint("map size %d\n", clientMap.size());
-                        for(auto a : clientMap) {
-                            dprint("User listing: %s\n", a.second.userName.c_str());
-                        }
-                        if(clientMap.find(tcpConnMap.find(it->fd)->second) != clientMap.end())
-                            clientMap.find(tcpConnMap.find(it->fd)->second)->second.tcpSockFd = -1;
-                        tcpConnMap.erase(tcpConnMap.find(it->fd));
+                        // Close connection
                         close(it->fd);
                         it = pollFd.erase(it);
-                        continue;
-    				}
-                    default: {
-                        dprint("WHAT IS HAPPENING?\n", 0);
-                        break;
                     }
-    			}
+                    else {
+                        // Send accept comm message
+                        *((uint16_t*)ECM + 2) = htons(ACCEPT_COMM);
+                        clientMap.find(newClientName)->second.tcpSockFd = it->fd;
+                        tcpConnMap[it->fd] = newClientName;
+                        if(write(it->fd, ECM, 6) < 0) {
+                            die("Failed to establish TCP connection.");
+                        }
+                    }
+
+                    break;
+                    // }
+                }
+				case ACCEPT_COMM: {
+                    dprint("Connected to user %s\n", tcpConnMap.find(it->fd)->second.c_str());
+                    // std::string str = "I promised to look after a friends cat for the week. My place has a glass atrium that goes through two levels, I have put the cat in there with enough food and water to last the week. I am looking forward to the end of the week. It is just sitting there glaring at me, it doesn't do anything else. I can tell it would like to kill me. If I knew I could get a perfect replacement cat, I would kill this one now and replace it Friday afternoon. As we sit here glaring at each other I have already worked out several ways to kill it. The simplest would be to drop heavy items on it from the upstairs bedroom though I have enough basic engineering knowledge to assume that I could build some form of 'spear like' projectile device from parts in the downstairs shed. If the atrium was waterproof, the most entertaining would be to flood it with water. It wouldn't have to be that deep, just deeper than the cat. I don't know how long cats can swim but I doubt it would be for a whole week. If it kept the swimming up for too long I could always try dropping things on it as well. I have read that drowning is one of the most peaceful ways to die so really it would be a win win situation for me and the cat I think.";
+                    // std::string str = "yo";
+                    // uint8_t ECM[6 + str.length() + 1];
+                    // int ECMLen = 6 + str.length() + 1;
+                    // memset(ECM, 0, 6 + str.length() + 1);
+
+                    // memcpy(ECM, "P2PI", 4);
+                    // *((uint16_t*)ECM + 2) = htons(DATA);
+                    // memcpy(ECM + 6, str.c_str(), str.length());
+                    // dprint("Sending...%s\n", strlen(str.c_str()));
+                    // int nbytes = write(it->fd, ECM, 6 + str.length() + 1);
+                    // if(nbytes < 0) {
+                    //     die("Failed to send data.");
+                    // }
+                    // // currentConnection = it->fd;
+                    // // sendDataMessage(str);
+                    // uint8_t ECM[6];
+                    // memcpy(ECM, "P2PI", 4);
+                    // *((uint16_t*)ECM + 2) = htons(REQUEST_USER_LIST);
+                    //
+                    // if(0 > write(it->fd, ECM, 6))
+                    //     die("Failed to send data");
+
+					break;
+				}
+				case USER_UNAVALIBLE: {
+					// Close connection as well
+                    dprint("The user %s is currently unavailable\n", tcpConnMap.find(it->fd)->second.c_str());
+					close(it->fd);
+					it = pollFd.erase(it);
+                    continue;
+				}
+				case REQUEST_USER_LIST: {
+                    dprint("hi\n",0);
+                    uint8_t ECM[10];
+                    memcpy(ECM, "P2PI", 4);
+                    *((uint16_t*)ECM + 2) = htons(REPLY_USER_LIST);
+                    *((uint32_t*)((uint16_t*)ECM + 3)) = htons(clientMap.size());
+
+                    if(0 > write(it->fd, ECM, 10))
+                        die("Failed to send user list reply");
+
+                    uint8_t userEntry[8 + 256 + 32 + 2];
+                    int i = 0;
+                    for(auto c : clientMap) {
+                        memset(userEntry, 0, 8 + 256 + 32 + 2);
+
+                        int len2Send = 6;
+                        *((uint32_t*)userEntry) = htons(i);
+                        *((uint16_t*)userEntry + 2) = htons(c.second.udpPort);
+                        memcpy(userEntry + 6, c.second.hostName.c_str(), c.second.hostName.length());
+                        len2Send += c.second.hostName.length() + 1;
+
+                        *((uint16_t*)(userEntry + len2Send)) = htons(c.second.tcpPort);
+                        len2Send += 2;
+
+                        memcpy(userEntry + len2Send, c.second.userName.c_str(), c.second.userName.length());
+                        len2Send += c.second.userName.length() + 1;
+
+                        if(0 > write(it->fd, userEntry, len2Send))
+                            die("Failed to send user list entry");
+
+                        i++;
+                    }
+
+					break;
+				}
+				case REPLY_USER_LIST: {
+                    // Get the entry count
+                    int j = 0, recvLen;
+                    uint8_t entryCountArr[5];
+                    memset(entryCountArr, 0, 5);
+
+                    do {
+                        recvLen = read(it->fd, entryCountArr + j, 1);
+                        j++;
+                    } while(j < 4);
+
+                    int entryCount = ntohs(*(uint32_t*)entryCountArr);
+
+                    dprint("Entry count is %d", entryCount);
+
+                    uint8_t entryArr[8 + 256 + 32 + 2];
+                    for(int k = 0; k < entryCount; k++) {
+
+                        int n = 0;
+                        // get entry number
+                        do {
+                            recvLen = read(it->fd, entryArr + n, 1);
+                            n++;
+                        } while(n < 4);
+
+                        int entryNum = ntohs(*(uint32_t*)entryArr);
+                        dprint("entry num is %d\n", entryNum);
+
+                        struct Client newClient;
+                        n = 0;
+                        // get udp port
+                        do {
+                            recvLen = read(it->fd, entryArr + 4 + n, 1);
+                            n++;
+                        } while(n < 2);
+
+                        newClient.udpPort = ntohs(*((uint16_t*)entryArr + 2));
+                        dprint("udpPort is %d\n", newClient.udpPort);
+
+                        n = 0;
+                        // get hostname
+                        do {
+                            recvLen = read(it->fd, entryArr + 6 + n, 1);
+                            dprint("%d %c\n", n, *(char*)(entryArr + 6 + n));
+                            if(entryArr[6 + n] == 0)
+                                break;
+                            n++;
+                        } while(1);
+
+                        newClient.hostName = (char*)(entryArr + 6);
+                        dprint("hostname is %s\n", newClient.hostName.c_str());
 
 
-    		// }
+                        n = 0;
+                        // get tcp port
+                        do {
+                            recvLen = read(it->fd, entryArr + 6 + n + newClient.hostName.length() + 1, 1);
+
+                            n++;
+                        } while(n < 2);
+
+                        newClient.tcpPort = ntohs(*((uint16_t*)(entryArr + 6 + newClient.hostName.length() + 1)));
+                        dprint("tcpPort is %d\n", newClient.tcpPort);
+
+                        n = 0;
+                        // get username
+                        do {
+                            recvLen = read(it->fd, entryArr + 6 + n + newClient.hostName.length() + 1 + 2, 1);
+                            dprint("%d %c\n", n, *(char*)(entryArr + 6 + n + newClient.hostName.length() + 1 + 2));
+
+                            if(entryArr[6 + n + newClient.hostName.length() + 1 + 2] == 0)
+                                break;
+                            n++;
+                        } while(1);
+
+                        newClient.userName = (char*)(entryArr + 6 + newClient.hostName.length() + 2 + 1);
+
+                        dprint("username %s, hostname %s, tcp %d, udp %d\n", newClient.userName.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
+
+                        if(clientMap.find(newClient.userName) == clientMap.end()) {
+                            clientMap[newClient.userName] = newClient;
+                        }
+                    }
+
+					break;
+				}
+
+                // TODO: break data into chuncks, it seems that it only sends 512 bytes at a time
+                // Not sure if it is a limit on the protocol
+				case DATA: {
+                    // Read in data
+                    int j = 0, recvLen;
+                    std::string dataBuffer = "";
+                    char dataMsg[513];
+
+                    while(1) {
+                        recvLen = read(it->fd, dataMsg + j, 1);
+                        if(dataMsg[j] == '\0')
+                            break;
+
+                        j++;
+
+                        if(j == 512) {
+                            dataMsg[j] = '\0';
+                            dataBuffer += dataMsg;
+                            dprint("current buffer %s\n", dataBuffer.c_str());
+                            j = 0;
+                        }
+
+                    }
+                    dataBuffer += dataMsg;
+
+					dprint("User %s message.\n", tcpConnMap.find(it->fd)->second.c_str());
+					printf("%s\n", dataBuffer.c_str());
+					break;
+				}
+				case DISCONTINUE_COMM: {
+                    dprint("User %s wants to discontinue communication.\n", tcpConnMap.find(it->fd)->second.c_str());
+                    dprint("map size %d\n", clientMap.size());
+                    for(auto a : clientMap) {
+                        dprint("User listing: %s\n", a.second.userName.c_str());
+                    }
+                    if(clientMap.find(tcpConnMap.find(it->fd)->second) != clientMap.end())
+                        clientMap.find(tcpConnMap.find(it->fd)->second)->second.tcpSockFd = -1;
+                    tcpConnMap.erase(tcpConnMap.find(it->fd));
+                    close(it->fd);
+                    it = pollFd.erase(it);
+                    continue;
+				}
+                default: {
+                    dprint("WHAT IS HAPPENING?\n", 0);
+                    break;
+                }
+			}
     	}
 
 
@@ -1189,15 +1040,15 @@ void checkSTDIN()
 }
 
 void sendDataMessage(std::string message){
-	uint8_t outgoingTCPMsg[6+message.length() + 1];  //max length data is 512
-	bzero(outgoingTCPMsg, 6+message.length() + 1);
+	uint8_t outgoingTCPMsg[6 + message.length() + 1];  //max length data is 512
+	bzero(outgoingTCPMsg, 6 + message.length() + 1);
 	uint16_t type = htons(DATA);
 	memcpy(outgoingTCPMsg, "P2PI", 4);
-	memcpy(outgoingTCPMsg+4, &type, 2);
-	memcpy(outgoingTCPMsg+6, message.c_str(), message.length());
+	memcpy(outgoingTCPMsg + 4, &type, 2);
+	memcpy(outgoingTCPMsg + 6, message.c_str(), message.length());
 
 	 //currentConnection is the fd that the client wishes to speak to.
-	if(write(currentConnection,outgoingTCPMsg, message.length()+7) < 0)
+	if(write(currentConnection,outgoingTCPMsg, message.length() + 7) < 0)
 		die("Failed to establish send data.");
 
 	message.clear();
