@@ -26,7 +26,6 @@
 #include <sys/ioctl.h>
 
 
-
 #define DISCOVERY 1
 #define REPLY 2
 #define CLOSING 3

@@ -61,7 +61,7 @@ std::unordered_map<int, std::string> tcpConnMap;
 int udpSockFd, tcpSockFd, enable = 1;
 struct sockaddr_in udpServerAddr, udpClientAddr, tcpServerAddr, tcpClientAddr;
 socklen_t udpClientAddrLen, tcpClientAddrLen; 
-// struct pollfd pollFd[2];
+
 std::vector<struct pollfd> pollFd(3);
 
 int away = 0;
@@ -76,6 +76,9 @@ int currentConnection = 0;
 
 std::unordered_map<std::string, struct Client>::iterator findClient(uint8_t* incomingUDPMsg);
 
+fd_set set;
+
+struct termios SavedTermAttributes;
 
 int main(int argc, char** argv) {
     // Setup signal handler
@@ -95,7 +98,6 @@ int main(int argc, char** argv) {
     // dprint("Mintimeout = %d\n", minTimeout);
     // dprint("Maxtimeout = %d\n", maxTimeout);
 
-	struct termios SavedTermAttributes;
 
 	pollFd[terminalFDPOLL].fd = STDIN_FILENO;
 	pollFd[terminalFDPOLL].events = POLLIN;
@@ -108,13 +110,13 @@ int main(int argc, char** argv) {
     int timePassed;
     int currTimeout = 0;
 
-	
 	SetNonCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
+
+	
 	printf(">");
-	fflush(STDIN_FILENO);
-    // When no host is available and maxTimeout not exceeded, discovery hosts
+	// When no host is available and maxTimeout not exceeded, discovery hosts
     while(baseTimeout <= maxTimeout * 1000) {
-        
+
         if(currTimeout <= 0) {
             if(clientMap.empty()) {
                 sendUDPMessage(DISCOVERY);
@@ -128,11 +130,9 @@ int main(int argc, char** argv) {
         // Wait for reply message
         gettimeofday(&start, NULL);
         //TODO: there is a potential bug, where currTimeout is set to 0 and poll returns immediately
-		/* for( auto i : pollFd)
-		{
-			dprint("%d\n", i.fd);
-		} */
+
         int rc = poll(pollFd.data(), pollFd.size(), currTimeout);
+
         gettimeofday(&end, NULL);
         timePassed = ((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec) / 1000;
         currTimeout -= timePassed;
@@ -186,7 +186,8 @@ printf("\033[2J"); // Clear screen
 */
 void optionError(char** argv){
     fprintf(stderr, "%s: option requires an argument -- '%s'\n", argv[0], optErr.c_str());
-    exit(1);
+	ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); 
+	exit(1);
 }
 
 
@@ -240,7 +241,9 @@ void getClientName()
     
     if(!found) {
         fprintf(stderr, "Failed to find subnet mask.");
+		ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); 
         exit(1);
+		
     }
 }
 
@@ -248,6 +251,7 @@ void getClientName()
 void die(const char *message) {
     perror(message);
     shutdown(udpSockFd, 0);
+	ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); 
     exit(1);
 }
 
@@ -277,6 +281,7 @@ void checkIsNum(const char* str) {
     for(int i = 0; i < strlen(str); i++) {
         if(!isdigit(str[i])) {
             fprintf(stderr, "Input %s is not a number!\n", str);
+			ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); 
             exit(1);
         }
     }
@@ -285,6 +290,7 @@ void checkIsNum(const char* str) {
 void checkPortRange(int portNum) {
     if(1 > portNum || 65535 < portNum) {
         fprintf(stderr, "Invalid port \"%d\", must be in range [1 65,535]\n", portNum);
+		ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); 
         exit(1);
     }
 }
@@ -319,9 +325,8 @@ void sendUDPMessage(int type) {
 
 }
 
-void SetNonCanonicalMode(int fd, struct termios *savedattributes) {
+void SetNonCanonicalMode(int fd, struct termios *savedattributes){
     struct termios TermAttributes;
-    char *name;
     
     // Make sure stdin is a terminal. 
     if(!isatty(fd)){
@@ -373,6 +378,7 @@ void SIGINT_handler(int signum) {
 
             shutdown(tcpSockFd, 0);
             shutdown(udpSockFd, 0);
+			ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); 
             exit(0);
         // }
     }
@@ -414,6 +420,7 @@ void parseOptions(int argc, char** argv) {
 
                     if(udpPort == tcpPort) {
                         fprintf(stderr, "Port conflicts!\n");
+						ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); 
                         exit(1);
                     }
 
@@ -432,6 +439,7 @@ void parseOptions(int argc, char** argv) {
 
                     if(maxTimeout < minTimeout) {
                         fprintf(stderr, "Get better with your math!\n");
+						ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); 
                         exit(1);
                     }
 
@@ -446,6 +454,7 @@ void parseOptions(int argc, char** argv) {
                     std::size_t pos = tmpArgv.find(":");
                     if(pos <= 0 || pos == tmpArgv.length() - 1) {
                         fprintf(stderr, "Invalid argument %s\n", argv[i + 1]);
+						ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes); 
                         exit(1);
                     }
 
@@ -827,15 +836,14 @@ void checkConnections()
 
 void checkSTDIN()
 {
-	if(pollFd[terminalFDPOLL].events == POLLIN) {
+	if(pollFd[terminalFDPOLL].revents & POLLIN) {
 		dprint("hello \n", 0);
 		ioctl(STDOUT_FILENO,TIOCGWINSZ,&size);
 		numcol = size.ws_col; //size of the terminal (column size)
-		int bytesRead = read(STDIN_FILENO, &RX, 4);
+		bytesRead = read(STDIN_FILENO, &RX, 4);
 		if (bytesRead < 2)
 		buffer.append((const char*)RX);
 		//dprint("buffer len: %d\n", buffer.length());
-		
 		//dprint("buffer: %c\n", buffer[0]);
 		if(bytesRead == 1) {
 			//printf("%c",buffer[0]);
@@ -855,7 +863,7 @@ void checkSTDIN()
 					switch(commandMap[firstWord])
 					{
 						case HELP:
-							printf("List of Commands:\n\connect username \n\t- sets user to forward message to\n\disconnect username \n\t- ends communation with user\ngetlist username\n\t- gets the list of users from another user \nlist \n\t- gets your current userlist\nhelp");
+							printf("List of Commands:\nconnect username \n\t- sets user to forward message to\n\disconnect username \n\t- ends communation with user\ngetlist username\n\t- gets the list of users from another user \nlist \n\t- gets your current userlist\nhelp");
 							break;
 					}
 				}
