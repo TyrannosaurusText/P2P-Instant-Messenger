@@ -428,7 +428,7 @@ void parseOptions(int argc, char** argv) {
 
                     break;
                 }
-                // TODO:
+
                 case HOST: {
                     std::string tmpArgv = argv[i + 1];
 
@@ -595,8 +595,19 @@ void setupSocket() {
     if(-1 == bind(udpSockFd, (struct sockaddr*)&udpServerAddr, sizeof(udpServerAddr)))
         die("Failed to bind udp socket");
 
-    if(-1 == bind(tcpSockFd, (struct sockaddr*)&tcpServerAddr, sizeof(tcpServerAddr)))
-        die("Failed to bind tcp socket");
+    if(-1 == bind(tcpSockFd, (struct sockaddr*)&tcpServerAddr, sizeof(tcpServerAddr))) {
+        // die("Failed to bind tcp socket");
+        dprintf("Port in used\n", 0);
+        tcpServerAddr.sin_port = 0;
+        if(-1 == bind(tcpSockFd, (struct sockaddr*)&tcpServerAddr, sizeof(tcpServerAddr))) {
+            dprintf("Port in used\n", 0);
+            die("No port is available.");
+        }
+        socklen_t len = sizeof(tcpServerAddr);
+        if(getsockname(tcpSockFd, (struct sockaddr *)&tcpServerAddr, &len) == -1)
+            die("Failed to get sock name.");
+        tcpPort = tcpServerAddr.sin_port;
+    }
 
     udpServerAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
 
@@ -1017,9 +1028,7 @@ void checkSTDIN()
 
                 //echos current message onto terminal
                 printf("\r%s>%s",userName.c_str(), message.c_str());
-
-
-
+                
                 std::string firstWord= message.substr(0, message.find_first_of(" ",0));
                 if(commandMap.find(firstWord) != commandMap.end())
                 {
