@@ -136,7 +136,7 @@ int main(int argc, char** argv) {
                 currTimeout = minTimeout;
         }
         //printf("\n");
-/*         clearline();      
+         clearline();      
 		std::string connName;
 		if(tcpConnMap.find(currentConnection) == tcpConnMap.end()){
 			//dprint("\nNo match\n",0);
@@ -150,7 +150,7 @@ int main(int argc, char** argv) {
             printf("%s>%s", connName.c_str(), message.substr(message.length()-numcol+connName.length()+1, numcol).c_str());
         else
             printf("%s>%s", connName.c_str(), message.c_str());
-        fflush(STDIN_FILENO); */
+        fflush(STDIN_FILENO); 
 
 
         // Wait for reply message
