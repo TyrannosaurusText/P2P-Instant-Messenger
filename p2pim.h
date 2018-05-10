@@ -43,6 +43,8 @@
 #define GETLIST 4
 #define HELP 5
 #define SWITCH 6
+#define AWAY 7
+#define UNAWAY 8
 
 void ResetCanonicalMode(int fd, struct termios *savedattributes);
 void SetNonCanonicalMode(int fd, struct termios *savedattributes);

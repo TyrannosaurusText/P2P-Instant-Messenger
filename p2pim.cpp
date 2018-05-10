@@ -1,5 +1,5 @@
 #include "p2pim.h"
-#define DEBUG 1
+// #define DEBUG 1
 #ifdef DEBUG
     #define dprint(string, ...) printf(string,__VA_ARGS__)
 #else
@@ -25,7 +25,7 @@ static std::unordered_map<std::string, int> optionMap {
 static std::unordered_map<std::string, int> commandMap {
     {"\\connect", CONNECT}, {"\\c", CONNECT}, {"\\switch", SWITCH}, 
     {"\\list", LIST}, {"\\disconnect", DISCONNECT}, {"\\getlist", GETLIST},
-    {"\\help", HELP}, {"\\away", AWAY}
+    {"\\help", HELP}, {"\\away", AWAY}, {"\\unaway", UNAWAY}
 };
 
 
@@ -74,7 +74,7 @@ char* RX[4]; //stdin buffer
 std::string buffer = "";
 std::string message = "";
 
-int currentConnection = 0;
+int currentConnection = -1;
 
 std::unordered_map<std::string, struct Client>::iterator findClient(uint8_t* incomingUDPMsg);
 
@@ -89,8 +89,9 @@ int main(int argc, char** argv) {
         die("Failed to catch signal");
 
     parseOptions(argc, argv);
-    initUDPMsg();
     setupSocket();
+    initUDPMsg();
+
 
     pollFd[terminalFDPOLL].fd = STDIN_FILENO;
     pollFd[terminalFDPOLL].events = POLLIN;
@@ -108,7 +109,7 @@ int main(int argc, char** argv) {
 
     // When no host is available and maxTimeout not exceeded, discovery hosts
     while(baseTimeout <= maxTimeout * 1000) {
-
+		
         if(currTimeout <= 0) {
             if(clientMap.empty()) {
                 if(!unicastHosts.empty()) {
@@ -152,7 +153,7 @@ int main(int argc, char** argv) {
         else
             printf("%s>%s", connName.c_str(), message.c_str());
         fflush(STDIN_FILENO); 
-
+ 
 
         // Wait for reply message
         gettimeofday(&start, NULL);
@@ -197,7 +198,7 @@ int main(int argc, char** argv) {
 
 /*
 printf("\033[XA"); // Move up X lines;
-printf("\033[XB"); // Move down X lines;
+printfprintf("\033[XB"); // Move down X lines;
 printf("\033[XC"); // Move right X column;
 printf("\033[XD"); // Move left X column;
 printf("\033[2J"); // Clear screen
@@ -516,7 +517,8 @@ void addNewClient(uint8_t* incomingUDPMsg) {
     newClient.tcpClientAddr = tcpClientAddr;
 
     // Inserting newClient to map
-    clientMap[newClient.userName] = newClient;
+    if(newClient.userName != userName)
+        clientMap[newClient.userName] = newClient;
 }
 
 void connectToClient(std::string clientName) {
@@ -595,6 +597,11 @@ void setupSocket() {
         sizeof(enable)) < 0) {
         die("Failed to set socket option reuse address");
     }
+	// enable = 0;
+	// if(setsockopt(tcpSockFd, SOL_SOCKET, SO_REUSEPORT, &enable,
+ //        sizeof(enable)) < 0) {
+ //        die("Failed to set socket option reuse address");
+ //    }
 
     udpServerAddr.sin_family = AF_INET;
     udpServerAddr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -609,15 +616,17 @@ void setupSocket() {
 
     if(-1 == bind(tcpSockFd, (struct sockaddr*)&tcpServerAddr, sizeof(tcpServerAddr))) {
         // die("Failed to bind tcp socket");
-        dprint("Port in used\n", 0);
+        printf("Port in used\n");
         tcpServerAddr.sin_port = 0;
         if(-1 == bind(tcpSockFd, (struct sockaddr*)&tcpServerAddr, sizeof(tcpServerAddr))) {
-            dprint("Port in used\n", 0);
+            printf("Port in used\n");
             die("No port is available.");
         }
         socklen_t len = sizeof(tcpServerAddr);
         if(getsockname(tcpSockFd, (struct sockaddr *)&tcpServerAddr, &len) == -1)
             die("Failed to get sock name.");
+
+        printf("new socket %d\n", tcpServerAddr.sin_port);
         tcpPort = tcpServerAddr.sin_port;
     }
 
@@ -782,7 +791,7 @@ void checkConnections()
                         dprint("WHO?\n", 0);
                     }
 
-                    if(away || clientMap.find(newClientName)->second.block) {
+                    if(away == 1 || clientMap.find(newClientName)->second.block) {
                         // Send user unavailable message
                         *((uint16_t*)ECM + 2) = htons(USER_UNAVALIBLE);
 
@@ -793,6 +802,10 @@ void checkConnections()
                         // Close connection
                         close(it->fd);
                         it = pollFd.erase(it);
+                        continue;
+                        // for(auto p : pollFd) {
+                            // printf("fd is %d\n", p.fd);
+                        // }
                     }
                     else {
                         // Send accept comm message
@@ -808,30 +821,7 @@ void checkConnections()
                     // }
                 }
                 case ACCEPT_COMM: {
-                    dprint("Connected to user %s\n", tcpConnMap.find(it->fd)->second.c_str());
-                    // std::string str = "I promised to look after a friends cat for the week. My place has a glass atrium that goes through two levels, I have put the cat in there with enough food and water to last the week. I am looking forward to the end of the week. It is just sitting there glaring at me, it doesn't do anything else. I can tell it would like to kill me. If I knew I could get a perfect replacement cat, I would kill this one now and replace it Friday afternoon. As we sit here glaring at each other I have already worked out several ways to kill it. The simplest would be to drop heavy items on it from the upstairs bedroom though I have enough basic engineering knowledge to assume that I could build some form of 'spear like' projectile device from parts in the downstairs shed. If the atrium was waterproof, the most entertaining would be to flood it with water. It wouldn't have to be that deep, just deeper than the cat. I don't know how long cats can swim but I doubt it would be for a whole week. If it kept the swimming up for too long I could always try dropping things on it as well. I have read that drowning is one of the most peaceful ways to die so really it would be a win win situation for me and the cat I think.";
-                    // std::string str = "yo";
-                    // uint8_t ECM[6 + str.length() + 1];
-                    // int ECMLen = 6 + str.length() + 1;
-                    // memset(ECM, 0, 6 + str.length() + 1);
-
-                    // memcpy(ECM, "P2PI", 4);
-                    // *((uint16_t*)ECM + 2) = htons(DATA);
-                    // memcpy(ECM + 6, str.c_str(), str.length());
-                    // dprint("Sending...%s\n", strlen(str.c_str()));
-                    // int nbytes = write(it->fd, ECM, 6 + str.length() + 1);
-                    // if(nbytes < 0) {
-                    //     die("Failed to send data.");
-                    // }
-                    // // currentConnection = it->fd;
-                    // // sendDataMessage(str);
-                    // uint8_t ECM[6];
-                    // memcpy(ECM, "P2PI", 4);
-                    // *((uint16_t*)ECM + 2) = htons(REQUEST_USER_LIST);
-
-                    // if(0 > write(it->fd, ECM, 6))
-                    //     die("Failed to send data");
-
+                    printf("\nConnected to user %s\n", tcpConnMap.find(it->fd)->second.c_str());
                     break;
                 }
                 case USER_UNAVALIBLE: {
@@ -844,6 +834,8 @@ void checkConnections()
                     }
                     close(it->fd);
                     it = pollFd.erase(it);
+
+                    currentConnection = -1;
                     continue;
                 }
                 case REQUEST_USER_LIST: {
@@ -993,7 +985,7 @@ void checkConnections()
                     dataBuffer += dataMsg;
 
                     dprint("User %s message.\n", tcpConnMap.find(it->fd)->second.c_str());
-                    printf("%s\n", dataBuffer.c_str());
+                    printf("%s>%s\n", tcpConnMap.find(it->fd)->second.c_str(), dataBuffer.c_str());
                     break;
                 }
                 case DISCONTINUE_COMM: {
@@ -1029,7 +1021,6 @@ void checkConnections()
 void checkSTDIN()
 {
     if(pollFd[terminalFDPOLL].revents & POLLIN) {
-        //dprint("hello \n", 0);
         ioctl(STDOUT_FILENO,TIOCGWINSZ,&size);
         numcol = size.ws_col; //size of the terminal (column size)
         bytesRead = read(STDIN_FILENO, &RX, 4);
@@ -1050,6 +1041,8 @@ void checkSTDIN()
             }
             else if(buffer[0] != '\n')
                 message += buffer[0];
+			
+			
             if(buffer[0] == '\n') { //send message
 
                 //echos current message onto terminal
@@ -1084,7 +1077,8 @@ void checkSTDIN()
 									printf("\nConnected to user: %s\n", target.c_str());
 								}
 								else {
-									printf("\nConnection already established. \n");
+									currentConnection = clientMap.find(target)->second.tcpSockFd;
+									//printf("\nConnection already established. \n");
 								}
                             }
                             else
@@ -1096,34 +1090,21 @@ void checkSTDIN()
                         }
                         case GETLIST:
 						{
-							std::string target="";
-							if(message.find_first_of(" ",0) == std::string::npos){
-								printf("\nNo users specified.\n");
-								break;
-							}
-							target = message.substr(firstWord.length()+1, message.find_first_of(" ",0));
-							
-							if(target.length() < 1)
-							{
-								printf("\nNo users specified.\n");
-								break;
-							}
-							
-							if(clientMap.find(target) != clientMap.end() && clientMap.find(target)->second.tcpSockFd != -1) {
+							if(currentConnection != -1){
 								uint8_t outgoingTCPMsg[6];  //max length data is 512
 								bzero(outgoingTCPMsg, 6);
 								uint16_t type = htons(REQUEST_USER_LIST);
 								memcpy(outgoingTCPMsg, "P2PI", 4);
 								memcpy(outgoingTCPMsg + 4, &type, 2);
 
-								 //currentConnection is the fd that the client wishes to speak to.
-								if(write(clientMap.find(target)->second.tcpSockFd, outgoingTCPMsg, 6) < 0)
+								 //target is the fd that the client wishes to speak to.
+								if(write(currentConnection, outgoingTCPMsg, 6) < 0)
 									die("Failed to establish send data.");
                                 
                             }
                             else
                             {
-                                printf("\nRequires a valid connection. \n", target.c_str());
+                                printf("\nNo connection. \n");
                             }
 						break;
 						}
@@ -1150,33 +1131,44 @@ void checkSTDIN()
 						break;
 						}
 						case DISCONNECT:
-						{
-                            std::string target="";
-							if(message.find_first_of(" ",0) == std::string::npos){
-								printf("\nNo users specified.\n");
-								break;
-							}
-							target = message.substr(firstWord.length()+1, message.find_first_of(" ",0));
-							
-							if(target.length() < 1)
-							{
-								printf("\nNo users specified.\n");
-								break;
-							}
-							if(clientMap.find(target) != clientMap.end() && clientMap.find(target)->second.tcpSockFd != -1) {
-                                uint8_t outgoingTCPMsg[6];
-                                memcpy(outgoingTCPMsg, "P2PI", 4);
-                                *((uint16_t*)outgoingTCPMsg + 2) = htons(DISCONTINUE_COMM);
+						{						
+							if(currentConnection != -1){
+								
+								printf("\nClosing connection\n");
+								
+								uint8_t outgoingTCPMsg[6];
+								memcpy(outgoingTCPMsg, "P2PI", 4);
+								*((uint16_t*)outgoingTCPMsg + 2) = htons(DISCONTINUE_COMM);
 
-                                if(write(clientMap.find(target)->second.tcpSockFd, outgoingTCPMsg, 6) < 0) {
-                                    die("Failed to send TCP message");
-                                }
-
+								if(write(currentConnection, outgoingTCPMsg, 6) < 0) {
+									die("Failed to send TCP message");
+								}
+								
+								if(tcpConnMap.find(currentConnection) != tcpConnMap.end())
+								{
+									std::string connName = tcpConnMap.find(currentConnection)->second;
+									close(clientMap.find(connName)->second.tcpSockFd);
+									
+									for(auto it=  pollFd.begin(); it != pollFd.end(); it++)
+									{
+										
+										if(it->fd==currentConnection){
+											pollFd.erase(it);
+											break;
+										}
+									}
+									tcpConnMap.erase(currentConnection);
+									clientMap.find(connName)->second.tcpSockFd = -1;
+								}
+								else{
+									printf("\nCurrent Connection no longer exists");
+									currentConnection = -1;
+								}
 							}
-							else{
-                                printf("\nConnection or user does not exist. \n", target.c_str());
-							}
-						      break;
+							else
+                                printf("\nConnection must be the current active connection.\n");
+						
+                            break;
 						}
 						case LIST:
                         {
@@ -1186,7 +1178,7 @@ void checkSTDIN()
                         }
                         case HELP:
                         {
-                            printf("\nList of Commands:\nconnect username -establishes connection to a user\n\tc user -connect\n\tdisconnect user -closes communication channel between users \n\tswitch user -redirect messages to the specified user if a connection has been established.\n\t- sets user to forward message to\n\disconnect username \n\t- ends communation with user\ngetlist username\n\t- gets the list of users from another user \nlist \n\t- gets your current userlist\nhelp");
+                            printf("\nList of Commands:\nconnect username \n\t-establishes connection to a user\ndisconnect \n\t-closes communication channel between current connection \nswitch user \n\t-redirect messages to the specified user if a connection has been established. \ngetlist \n\t- gets the list of users from current connection \nlist \n\t- gets your current userlist\nhelp\n\t-it's a mystery\naway \n\t-Sets self to away\nunaway\n\t-brings self back from away.");
                             break;
                         }
 
@@ -1209,14 +1201,20 @@ void checkSTDIN()
                                 it = pollFd.erase(it);
                             }
 
+                            away = 1;
+
+                            break;
+                        }
+                        case UNAWAY: {
+                            away = 0;
                             break;
                         }
 					}
                 }
-                else if(currentConnection != 0)
+                else if(currentConnection != -1)
                     sendDataMessage(message);
                 else
-                    printf("No connection established, to connect use: \\connect Username\n");
+                    printf("\nNo connection established, to connect use: \\connect Username\n");
                 message.clear();
 
                 printf("\n\033[1B"); //prints down key.
@@ -1255,7 +1253,7 @@ void sendDataMessage(std::string message){
     memcpy(outgoingTCPMsg + 4, &type, 2);
     memcpy(outgoingTCPMsg + 6, message.c_str(), message.length());
 
-     //currentConnection is the fd that the client wishes to speak to.
+    //currentConnection is the fd that the client wishes to speak to.
     if(write(currentConnection,outgoingTCPMsg, message.length() + 7) < 0)
         die("Failed to establish send data.");
 
@@ -1266,6 +1264,7 @@ void generateList()
 {
     list = "";
     int c = 0;
+    dprint("Map size is: %d\n", clientMap.size());
     for( auto i : clientMap )
     {
         list.append("User ");
