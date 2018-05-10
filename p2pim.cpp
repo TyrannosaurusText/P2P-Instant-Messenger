@@ -104,6 +104,8 @@ int main(int argc, char** argv) {
     int timePassed;
     int currTimeout = 0;
 
+    printf("Please type in \"\\help\" for a list of commands available\n");
+
     SetNonCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
 
 
@@ -534,7 +536,8 @@ void connectToClient(std::string clientName) {
 
         it->second.tcpClientAddr.sin_family = AF_INET;
         it->second.tcpClientAddr.sin_addr = remoteAddr;
-        it->second.tcpClientAddr.sin_port = htons(it->second.tcpPort);
+        it->second.tcpClientAddr.sin_port = it->second.tcpPort;
+        printf("port is %d\n", it->second.tcpClientAddr.sin_port);
 
         struct sockaddr_in client2ConnetAddr = it->second.tcpClientAddr;
 
@@ -691,7 +694,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                         if(findClient(incomingUDPMsg) == clientMap.end()) {
                             std::string userName_a, hostName_a;
                             getClientNUserName(incomingUDPMsg, hostName_a, userName_a);
-                            dprint("-----NEW HOST: %s-----\n", userName_a.c_str());
+                            printf("\r-----NEW HOST: %s-----\n", userName_a.c_str());
 
                             addNewClient(incomingUDPMsg);
                         }
@@ -710,7 +713,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     if(findClient(incomingUDPMsg) == clientMap.end()) {
                         std::string userName_a, hostName_a;
                         getClientNUserName(incomingUDPMsg, hostName_a, userName_a);
-                        dprint("-----NEW HOST: %s-----\n", userName_a.c_str());
+                        printf("\r-----NEW HOST: %s-----\n", userName_a.c_str());
                         addNewClient(incomingUDPMsg);
 
                         // Try to initiate tcp connection with host
@@ -725,6 +728,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     std::unordered_map<std::string, struct Client>::iterator it = findClient(incomingUDPMsg);
 
                     if(it != clientMap.end()) {
+                        printf("\rClient %s is closing\n", it->first.c_str());
                         if(it->second.tcpSockFd == currentConnection)
                             currentConnection = -1;
 
@@ -786,7 +790,6 @@ void checkConnections()
                     int ECMLen = 6;
                     memcpy(ECM, "P2PI", 4);
 
-                    dprint("New Client Name is %s\n", newClientName.c_str());
                     if(clientMap.find(newClientName) == clientMap.end()) {
                         dprint("WHO?\n", 0);
                     }
@@ -815,6 +818,8 @@ void checkConnections()
                         if(write(it->fd, ECM, 6) < 0) {
                             die("Failed to establish TCP connection.");
                         }
+                        printf("Accepting connection from: %s\n", newClientName.c_str());
+
                     }
 
                     break;
@@ -826,7 +831,7 @@ void checkConnections()
                 }
                 case USER_UNAVALIBLE: {
                     // Close connection as well
-                    dprint("The user %s is currently unavailable\n", tcpConnMap.find(it->fd)->second.c_str());
+                    printf("The user %s is currently unavailable\n", tcpConnMap.find(it->fd)->second.c_str());
                     if(clientMap.find(tcpConnMap.find(it->fd)->second) != clientMap.end())
                         clientMap.find(tcpConnMap.find(it->fd)->second)->second.tcpSockFd = -1;
                     if(tcpConnMap.find(it->fd) != tcpConnMap.end()) {
@@ -839,6 +844,7 @@ void checkConnections()
                     continue;
                 }
                 case REQUEST_USER_LIST: {
+                    printf("User list requested\n");
                     dprint("hi\n",0);
                     uint8_t ECM[10];
                     memcpy(ECM, "P2PI", 4);
@@ -950,12 +956,15 @@ void checkConnections()
 
                         newClient.userName = (char*)(entryArr + 6 + newClient.hostName.length() + 2 + 1);
 
-                        dprint("username %s, hostname %s, tcp %d, udp %d\n", newClient.userName.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
+                        // printf("username %s, hostname %s, tcp %d, udp %d\n", newClient.userName.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
 
                         if(newClient.userName != userName && clientMap.find(newClient.userName) == clientMap.end()) {
                             clientMap[newClient.userName] = newClient;
                         }
                     }
+
+                    generateList();
+                    printf("\n%s\n", list.c_str());
 
                     break;
                 }
@@ -985,11 +994,11 @@ void checkConnections()
                     dataBuffer += dataMsg;
 
                     dprint("User %s message.\n", tcpConnMap.find(it->fd)->second.c_str());
-                    printf("%s>%s\n", tcpConnMap.find(it->fd)->second.c_str(), dataBuffer.c_str());
+                    printf("\r%s>%s\n", tcpConnMap.find(it->fd)->second.c_str(), dataBuffer.c_str());
                     break;
                 }
                 case DISCONTINUE_COMM: {
-                    dprint("User %s wants to discontinue communication.\n", tcpConnMap.find(it->fd)->second.c_str());
+                    printf("User %s wants to disconnect.\n", tcpConnMap.find(it->fd)->second.c_str());
                     dprint("map size %d\n", clientMap.size());
                     for(auto a : clientMap) {
                         dprint("User listing: %s\n", a.second.userName.c_str());
@@ -1178,7 +1187,7 @@ void checkSTDIN()
                         }
                         case HELP:
                         {
-                            printf("\nList of Commands:\nconnect username \n\t-establishes connection to a user\ndisconnect \n\t-closes communication channel between current connection \nswitch user \n\t-redirect messages to the specified user if a connection has been established. \ngetlist \n\t- gets the list of users from current connection \nlist \n\t- gets your current userlist\nhelp\n\t-it's a mystery\naway \n\t-Sets self to away\nunaway\n\t-brings self back from away.");
+                            printf("\nList of Commands:\n\\connect username \n\t-establishes connection to a user\n\\disconnect \n\t-closes communication channel between current connection \n\\switch user \n\t-redirect messages to the specified user if a connection has been established. \n\\getlist \n\t- gets the list of users from current connection \n\\list \n\t- gets your current userlist\n\\help\n\t-it's a mystery\n\\away \n\t-Sets self to away\n\\unaway\n\t-brings self back from away.");
                             break;
                         }
 
