@@ -536,7 +536,7 @@ void connectToClient(std::string clientName) {
 
         it->second.tcpClientAddr.sin_family = AF_INET;
         it->second.tcpClientAddr.sin_addr = remoteAddr;
-        it->second.tcpClientAddr.sin_port = it->second.tcpPort;
+        it->second.tcpClientAddr.sin_port = htons(it->second.tcpPort);
         printf("port is %d\n", it->second.tcpClientAddr.sin_port);
 
         struct sockaddr_in client2ConnetAddr = it->second.tcpClientAddr;
@@ -630,7 +630,7 @@ void setupSocket() {
             die("Failed to get sock name.");
 
         printf("new socket %d\n", tcpServerAddr.sin_port);
-        tcpPort = tcpServerAddr.sin_port;
+        tcpPort = ntohs(tcpServerAddr.sin_port);
     }
 
     udpServerAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
