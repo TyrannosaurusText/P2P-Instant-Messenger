@@ -136,12 +136,21 @@ int main(int argc, char** argv) {
                 currTimeout = minTimeout;
         }
         //printf("\n");
-        clearline();
-        if(message.length()+1 > numcol) //simulate loop
-            printf("%s", message.substr(message.length()-numcol, numcol).c_str());
+         clearline();      
+		std::string connName;
+		if(tcpConnMap.find(currentConnection) == tcpConnMap.end()){
+			//dprint("\nNo match\n",0);
+			connName = "";
+		}
+		else{
+			connName = tcpConnMap.find(currentConnection)->second;
+			//dprint("%s\n", connName.c_str());
+		}
+		if(message.length()+connName.length() > numcol) //simulate loop
+            printf("%s>%s", connName.c_str(), message.substr(message.length()-numcol+connName.length()+1, numcol).c_str());
         else
-            printf(">%s", message.c_str());
-        fflush(STDIN_FILENO);
+            printf("%s>%s", connName.c_str(), message.c_str());
+        fflush(STDIN_FILENO); 
 
 
         // Wait for reply message
@@ -1180,10 +1189,19 @@ void checkSTDIN()
 
         }
         clearline();
-        if(message.length()+1 > numcol) //simulate loop
-            printf("%s", message.substr(message.length()-numcol, numcol).c_str());
+		std::string connName;
+		if(tcpConnMap.find(currentConnection) == tcpConnMap.end()){
+			//dprint("\nNo match\n",0);
+			connName = "";
+		}
+		else{
+			connName = tcpConnMap.find(currentConnection)->second;
+			//dprint("%s\n", connName.c_str());
+		}
+        if(message.length()+connName.length()+1 > numcol) //simulate loop
+            printf("%s>%s", connName.c_str(), message.substr(message.length()+connName.length()+1-numcol, numcol).c_str());
         else
-            printf(">%s", message.c_str());
+            printf("%s>%s", connName.c_str(), message.c_str());
         //printf("\033[0C");
         fflush(STDIN_FILENO);
         buffer.clear();
