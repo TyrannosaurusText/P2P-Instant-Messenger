@@ -537,7 +537,6 @@ void connectToClient(std::string clientName) {
         it->second.tcpClientAddr.sin_family = AF_INET;
         it->second.tcpClientAddr.sin_addr = remoteAddr;
         it->second.tcpClientAddr.sin_port = htons(it->second.tcpPort);
-        printf("port is %d\n", it->second.tcpClientAddr.sin_port);
 
         struct sockaddr_in client2ConnetAddr = it->second.tcpClientAddr;
 
