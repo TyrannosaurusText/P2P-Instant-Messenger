@@ -1,5 +1,5 @@
 #include "p2pim.h"
-// #define DEBUG 1
+#define DEBUG 1
 #ifdef DEBUG
     #define dprint(string, ...) printf(string,__VA_ARGS__)
 #else
@@ -23,8 +23,9 @@ static std::unordered_map<std::string, int> optionMap {
 };
 
 static std::unordered_map<std::string, int> commandMap {
-    {"\\connect", CONNECT}, {"\\c", CONNECT}, {"\\switch", SWITCH}, {"\\list", LIST}, {"\\disconnect", DISCONNECT}, {"\\getlist", GETLIST},
-    {"\\help", HELP}
+    {"\\connect", CONNECT}, {"\\c", CONNECT}, {"\\switch", SWITCH}, 
+    {"\\list", LIST}, {"\\disconnect", DISCONNECT}, {"\\getlist", GETLIST},
+    {"\\help", HELP}, {"\\away", AWAY}
 };
 
 
@@ -133,10 +134,10 @@ int main(int argc, char** argv) {
                 currTimeout = baseTimeout;
             }
             else
-                currTimeout = minTimeout;
+                currTimeout = -1;
         }
         //printf("\n");
-         clearline();      
+        clearline();      
 		std::string connName;
 		if(tcpConnMap.find(currentConnection) == tcpConnMap.end()){
 			//dprint("\nNo match\n",0);
@@ -155,6 +156,7 @@ int main(int argc, char** argv) {
 
         // Wait for reply message
         gettimeofday(&start, NULL);
+        dprint("currtimeout is %d\n", currTimeout);
         int rc = poll(pollFd.data(), pollFd.size(), currTimeout);
 
         gettimeofday(&end, NULL);
@@ -528,6 +530,7 @@ void connectToClient(std::string clientName) {
         struct in_addr remoteAddr;
         memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
 
+        it->second.tcpClientAddr.sin_family = AF_INET;
         it->second.tcpClientAddr.sin_addr = remoteAddr;
         it->second.tcpClientAddr.sin_port = htons(it->second.tcpPort);
 
@@ -606,10 +609,10 @@ void setupSocket() {
 
     if(-1 == bind(tcpSockFd, (struct sockaddr*)&tcpServerAddr, sizeof(tcpServerAddr))) {
         // die("Failed to bind tcp socket");
-        dprintf("Port in used\n", 0);
+        dprint("Port in used\n", 0);
         tcpServerAddr.sin_port = 0;
         if(-1 == bind(tcpSockFd, (struct sockaddr*)&tcpServerAddr, sizeof(tcpServerAddr))) {
-            dprintf("Port in used\n", 0);
+            dprint("Port in used\n", 0);
             die("No port is available.");
         }
         socklen_t len = sizeof(tcpServerAddr);
@@ -712,8 +715,12 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     // Remove host from map
                     std::unordered_map<std::string, struct Client>::iterator it = findClient(incomingUDPMsg);
 
-                    if(it != clientMap.end())
+                    if(it != clientMap.end()) {
+                        if(it->second.tcpSockFd == currentConnection)
+                            currentConnection = -1;
+
                         clientMap.erase(it);
+                    }
 
                     // If no more host is available, go back to discovery
                     if(clientMap.empty()) {
@@ -830,6 +837,11 @@ void checkConnections()
                 case USER_UNAVALIBLE: {
                     // Close connection as well
                     dprint("The user %s is currently unavailable\n", tcpConnMap.find(it->fd)->second.c_str());
+                    if(clientMap.find(tcpConnMap.find(it->fd)->second) != clientMap.end())
+                        clientMap.find(tcpConnMap.find(it->fd)->second)->second.tcpSockFd = -1;
+                    if(tcpConnMap.find(it->fd) != tcpConnMap.end()) {
+                        tcpConnMap.erase(tcpConnMap.find(it->fd));
+                    }
                     close(it->fd);
                     it = pollFd.erase(it);
                     continue;
@@ -993,6 +1005,11 @@ void checkConnections()
                     if(clientMap.find(tcpConnMap.find(it->fd)->second) != clientMap.end())
                         clientMap.find(tcpConnMap.find(it->fd)->second)->second.tcpSockFd = -1;
                     tcpConnMap.erase(tcpConnMap.find(it->fd));
+
+                    if(it->fd == currentConnection) {
+                        currentConnection = -1;
+                    }
+
                     close(it->fd);
                     it = pollFd.erase(it);
                     continue;
@@ -1134,7 +1151,7 @@ void checkSTDIN()
 						}
 						case DISCONNECT:
 						{
-							std::string target="";
+                            std::string target="";
 							if(message.find_first_of(" ",0) == std::string::npos){
 								printf("\nNo users specified.\n");
 								break;
@@ -1159,7 +1176,7 @@ void checkSTDIN()
 							else{
                                 printf("\nConnection or user does not exist. \n", target.c_str());
 							}
-						break;
+						      break;
 						}
 						case LIST:
                         {
@@ -1172,7 +1189,29 @@ void checkSTDIN()
                             printf("\nList of Commands:\nconnect username -establishes connection to a user\n\tc user -connect\n\tdisconnect user -closes communication channel between users \n\tswitch user -redirect messages to the specified user if a connection has been established.\n\t- sets user to forward message to\n\disconnect username \n\t- ends communation with user\ngetlist username\n\t- gets the list of users from another user \nlist \n\t- gets your current userlist\nhelp");
                             break;
                         }
-						}
+
+                        case AWAY:
+                        {
+                            for(auto c: tcpConnMap) {
+                                uint8_t outgoingTCPMsg[6];
+                                memcpy(outgoingTCPMsg, "P2PI", 4);
+                                *((uint16_t*)outgoingTCPMsg + 2) = htons(USER_UNAVALIBLE);
+
+                                if(write(c.first, outgoingTCPMsg, 6) < 0) {
+                                    die("Failed to send away message");
+                                }
+
+                                clientMap.find(c.second)->second.tcpSockFd = -1;
+                            }
+
+                            tcpConnMap.clear();
+                            for(auto it = pollFd.begin() + 3; it != pollFd.end();) {
+                                it = pollFd.erase(it);
+                            }
+
+                            break;
+                        }
+					}
                 }
                 else if(currentConnection != 0)
                     sendDataMessage(message);
