@@ -42,7 +42,7 @@
 #define DISCONNECT 3
 #define GETLIST 4
 #define HELP 5
-
+#define SWITCH 6
 
 void ResetCanonicalMode(int fd, struct termios *savedattributes);
 void SetNonCanonicalMode(int fd, struct termios *savedattributes);
