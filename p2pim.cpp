@@ -1,5 +1,5 @@
 #include "p2pim.h"
-#define DEBUG 1
+// #define DEBUG 1
 #ifdef DEBUG
     #define dprint(string, ...) printf(string,__VA_ARGS__)
 #else
@@ -462,7 +462,6 @@ void parseOptions(int argc, char** argv) {
                     memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
                     inet_ntop(AF_INET, &remoteAddr, buf, INET_ADDRSTRLEN);
 
-                    // TODO:
                     if((remoteAddr.s_addr & tmpMask.s_addr) != (tmpIPAddr.s_addr & tmpMask.s_addr)) {
                         struct Host newUnicastHost;
                         newUnicastHost.hostName = tmpHostName;
@@ -799,12 +798,12 @@ void checkConnections()
                     // }
                     // // currentConnection = it->fd;
                     // // sendDataMessage(str);
-                    uint8_t ECM[6];
-                    memcpy(ECM, "P2PI", 4);
-                    *((uint16_t*)ECM + 2) = htons(REQUEST_USER_LIST);
+                    // uint8_t ECM[6];
+                    // memcpy(ECM, "P2PI", 4);
+                    // *((uint16_t*)ECM + 2) = htons(REQUEST_USER_LIST);
 
-                    if(0 > write(it->fd, ECM, 6))
-                        die("Failed to send data");
+                    // if(0 > write(it->fd, ECM, 6))
+                    //     die("Failed to send data");
 
                     break;
                 }
@@ -929,7 +928,7 @@ void checkConnections()
 
                         dprint("username %s, hostname %s, tcp %d, udp %d\n", newClient.userName.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
 
-                        if(clientMap.find(newClient.userName) == clientMap.end()) {
+                        if(newClient.userName != userName && clientMap.find(newClient.userName) == clientMap.end()) {
                             clientMap[newClient.userName] = newClient;
                         }
                     }
@@ -937,8 +936,7 @@ void checkConnections()
                     break;
                 }
 
-                // TODO: break data into chuncks, it seems that it only sends 512 bytes at a time
-                // Not sure if it is a limit on the protocol
+               
                 case DATA: {
                     // Read in data
                     int j = 0, recvLen;
@@ -1019,7 +1017,6 @@ void checkSTDIN()
 
                 //echos current message onto terminal
                 printf("\r%s>%s",userName.c_str(), message.c_str());
-                //TODO: Actually proccess message
 
 
 
@@ -1048,6 +1045,7 @@ void checkSTDIN()
                             if( clientMap.find(target) != clientMap.end() ) {
                                 if(clientMap.find(target)->second.tcpSockFd == -1) {
 									connectToClient(target);
+                                    currentConnection = clientMap.find(target)->second.tcpSockFd;
 									printf("\nConnected to user: %s\n", target.c_str());
 								}
 								else {
@@ -1084,7 +1082,7 @@ void checkSTDIN()
 								memcpy(outgoingTCPMsg + 4, &type, 2);
 
 								 //currentConnection is the fd that the client wishes to speak to.
-								if(write(clientMap.find(target)->second.tcpSockFd,outgoingTCPMsg, 6) < 0)
+								if(write(clientMap.find(target)->second.tcpSockFd, outgoingTCPMsg, 6) < 0)
 									die("Failed to establish send data.");
                                 
                             }
@@ -1131,7 +1129,14 @@ void checkSTDIN()
 								break;
 							}
 							if(clientMap.find(target) != clientMap.end() && clientMap.find(target)->second.tcpSockFd != -1) {
-								//TODO: close connection
+                                uint8_t outgoingTCPMsg[6];
+                                memcpy(outgoingTCPMsg, "P2PI", 4);
+                                *((uint16_t*)outgoingTCPMsg + 2) = htons(DISCONTINUE_COMM);
+
+                                if(write(clientMap.find(target)->second.tcpSockFd, outgoingTCPMsg, 6) < 0) {
+                                    die("Failed to send TCP message");
+                                }
+
 							}
 							else{
                                 printf("\nConnection or user does not exist. \n", target.c_str());
