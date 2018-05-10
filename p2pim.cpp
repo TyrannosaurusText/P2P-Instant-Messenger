@@ -528,6 +528,7 @@ void connectToClient(std::string clientName) {
         struct in_addr remoteAddr;
         memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
 
+        it->second.tcpClientAddr.sin_family = AF_INET;
         it->second.tcpClientAddr.sin_addr = remoteAddr;
         it->second.tcpClientAddr.sin_port = htons(it->second.tcpPort);
 
