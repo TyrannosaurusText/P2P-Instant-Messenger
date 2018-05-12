@@ -1,12 +1,10 @@
 #include "p2pim.h"
-// #define DEBUG 1
+#define DEBUG 1
 #ifdef DEBUG
     #define dprint(string, ...) printf(string,__VA_ARGS__)
 #else
     #define dprint(string, ...)
 #endif
-
-
 
 #define MAX_UDP_MSG_LEN (10 + 254 + 32 + 2)
 
@@ -37,6 +35,7 @@ struct Client {
     sockaddr_in tcpClientAddr;
     int tcpSockFd = -1;
     int block = 0;
+    std::string leftOverMsg = "";
 };
 
 struct Host {
@@ -189,7 +188,7 @@ int main(int argc, char** argv) {
 
         }
         else
-            dprint("ERROR\n", 0);
+            fprintf(stderr, "POLL ERROR\n");
     }
 
     ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
@@ -331,7 +330,6 @@ void sendUDPMessage(int type) {
             die("Failed to send broadcast message");
         }
     }
-
 }
 
 void SetNonCanonicalMode(int fd, struct termios *savedattributes){
@@ -377,7 +375,6 @@ void SIGINT_handler(int signum) {
         shutdown(udpSockFd, 0);
         ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
         exit(0);
-        // }
     }
 }
 
@@ -390,105 +387,108 @@ void parseOptions(int argc, char** argv) {
         optErr = argv[i];
 
         // Check if option is valid
-        if(argv[i][0] == '-' && optionMap.find(argv[i]) != optionMap.end()) {
-            if(i == argc - 1 || argv[i + 1][0] == '-')
-                    optionError(argv);
+        if(argv[i][0] == '-') {
+            if(optionMap.find(argv[i]) != optionMap.end()) {
+                if(i == argc - 1 || argv[i + 1][0] == '-')
+                        optionError(argv);
 
-            // Handle options
-            switch(optionMap[argv[i]])
-            {
-                case USERNAME: {
-                    optionMap[argv[i]] = -1;
-                    userName = argv[i + 1];
-                    break;
-                }
-                case UDP_PORT: {
-                    optionMap[argv[i]] = -1;
-                    checkIsNum(argv[i + 1]);
-                    udpPort = atoi(argv[i + 1]);
-                    checkPortRange(udpPort);
-                    break;
-                }
-                case TCP_PORT: {
-                    optionMap[argv[i]] = -1;
-                    checkIsNum(argv[i + 1]);
-                    tcpPort = atoi(argv[i + 1]);
-                    checkPortRange(tcpPort);
+                // Handle options
+                switch(optionMap[argv[i]])
+                {
+                    case USERNAME: {
+                        optionMap[argv[i]] = -1;
+                        userName = argv[i + 1];
+                        break;
+                    }
+                    case UDP_PORT: {
+                        optionMap[argv[i]] = -1;
+                        checkIsNum(argv[i + 1]);
+                        udpPort = atoi(argv[i + 1]);
+                        checkPortRange(udpPort);
+                        break;
+                    }
+                    case TCP_PORT: {
+                        optionMap[argv[i]] = -1;
+                        checkIsNum(argv[i + 1]);
+                        tcpPort = atoi(argv[i + 1]);
+                        checkPortRange(tcpPort);
 
-                    if(udpPort == tcpPort) {
-                        fprintf(stderr, "Port conflicts!\n");
-                        ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
+                        if(udpPort == tcpPort) {
+                            fprintf(stderr, "Port conflicts!\n");
+                            ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
+                            exit(1);
+                        }
+                        break;
+                    }
+                    case MIN_TIMEOUT: {
+                        optionMap[argv[i]] = -1;
+                        checkIsNum(argv[i + 1]);
+                        minTimeout = atoi(argv[i + 1]);
+                        break;
+                    }
+                    case MAX_TIMEOUT: {
+                        optionMap[argv[i]] = -1;
+                        checkIsNum(argv[i + 1]);
+                        maxTimeout = atoi(argv[i + 1]);
+
+                        if(maxTimeout < minTimeout) {
+                            fprintf(stderr, "Get better with your math!\n");
+                            ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
+                            exit(1);
+                        }
+                        break;
+                    }
+                    case HOST: {
+                        std::string tmpArgv = argv[i + 1];
+
+                        // Parse hostname part and port num part
+                        std::size_t pos = tmpArgv.find(":");
+                        if(pos <= 0 || pos == tmpArgv.length() - 1) {
+                            fprintf(stderr, "Invalid argument %s\n", argv[i + 1]);
+                            ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
+                            exit(1);
+                        }
+                        std::string tmpHostName = tmpArgv.substr(0, pos);
+                        std::string tmpPortNumStr = tmpArgv.substr(pos + 1);
+                        checkIsNum(tmpPortNumStr.c_str());
+
+                        int tmpPortNum = std::stoi(tmpPortNumStr);
+
+                        dprint("%s %d\n", tmpHostName.c_str(), tmpPortNum);
+
+                        // Check if host is in local subnet
+                        // First resolve host's domain name
+                        struct hostent* remoteHostEntry = gethostbyname(tmpHostName.c_str());
+                        if(!remoteHostEntry) {
+                            die("Failed to resolve host");
+                        }
+
+                        struct in_addr remoteAddr;
+                        char buf[256];
+                        struct ifaddrs *currentIFAddr, *firstIFAddr;
+
+                        memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
+                        inet_ntop(AF_INET, &remoteAddr, buf, INET_ADDRSTRLEN);
+
+                        if((remoteAddr.s_addr & tmpMask.s_addr) != (tmpIPAddr.s_addr & tmpMask.s_addr)) {
+                            struct Host newUnicastHost;
+                            newUnicastHost.hostName = tmpHostName;
+                            newUnicastHost.portNum = tmpPortNum;
+
+                            unicastHosts.push_back(newUnicastHost);
+                        }
+                        break;
+                    }
+                    default: {
+                        fprintf(stderr, "PARSE ERROR\n");
                         exit(1);
+                        break;
                     }
-
-                    break;
                 }
-                case MIN_TIMEOUT: {
-                    optionMap[argv[i]] = -1;
-                    checkIsNum(argv[i + 1]);
-                    minTimeout = atoi(argv[i + 1]);
-                    break;
-                }
-                case MAX_TIMEOUT: {
-                    optionMap[argv[i]] = -1;
-                    checkIsNum(argv[i + 1]);
-                    maxTimeout = atoi(argv[i + 1]);
-
-                    if(maxTimeout < minTimeout) {
-                        fprintf(stderr, "Get better with your math!\n");
-                        ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
-                        exit(1);
-                    }
-
-                    break;
-                }
-
-                case HOST: {
-                    std::string tmpArgv = argv[i + 1];
-
-                    // Parse hostname part and port num part
-                    std::size_t pos = tmpArgv.find(":");
-                    if(pos <= 0 || pos == tmpArgv.length() - 1) {
-                        fprintf(stderr, "Invalid argument %s\n", argv[i + 1]);
-                        ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
-                        exit(1);
-                    }
-
-                    std::string tmpHostName = tmpArgv.substr(0, pos);
-                    std::string tmpPortNumStr = tmpArgv.substr(pos + 1);
-                    checkIsNum(tmpPortNumStr.c_str());
-
-                    int tmpPortNum = std::stoi(tmpPortNumStr);
-
-                    dprint("%s %d\n", tmpHostName.c_str(), tmpPortNum);
-
-                    // Check if host is in local subnet
-                    // First resolve host's domain name
-                    struct hostent* remoteHostEntry = gethostbyname(tmpHostName.c_str());
-                    if(!remoteHostEntry) {
-                        die("Failed to resolve host");
-                    }
-
-                    struct in_addr remoteAddr;
-                    char buf[256];
-                    struct ifaddrs *currentIFAddr, *firstIFAddr;
-
-                    memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
-                    inet_ntop(AF_INET, &remoteAddr, buf, INET_ADDRSTRLEN);
-
-                    if((remoteAddr.s_addr & tmpMask.s_addr) != (tmpIPAddr.s_addr & tmpMask.s_addr)) {
-                        struct Host newUnicastHost;
-                        newUnicastHost.hostName = tmpHostName;
-                        newUnicastHost.portNum = tmpPortNum;
-
-                        unicastHosts.push_back(newUnicastHost);
-                    }
-
-                    break;
-                }
-                default: {
-                    optionError(argv);
-                }
+            }
+            else {
+                fprintf(stderr, "Invalid options %s\n", argv[i]);
+                exit(1);
             }
         }
     }
@@ -514,9 +514,9 @@ void addNewClient(uint8_t* incomingUDPMsg) {
     getPorts(incomingUDPMsg, newClient.udpPort, newClient.tcpPort);
 
     // Store the TCP address
-    struct sockaddr_in tcpClientAddr = udpClientAddr;
-    tcpClientAddr.sin_port = htons(newClient.tcpPort);
-    newClient.tcpClientAddr = tcpClientAddr;
+    // struct sockaddr_in tcpClientAddr = udpClientAddr;
+    // tcpClientAddr.sin_port = htons(newClient.tcpPort);
+    // newClient.tcpClientAddr = tcpClientAddr;
 
     // Inserting newClient to map
     if(newClient.userName != userName)
@@ -758,13 +758,18 @@ void checkConnections()
         if(it->revents == POLLIN) {
             dprint("%d has something, size %d\n", it->fd, pollFd.size());
             uint8_t incomingTCPMsg[518];
-            bzero(incomingTCPMsg, 518);
+            memset(incomingTCPMsg, 0, 518);
             int recvLen, j = 0;
 
-            do {
-                recvLen = read(it->fd, incomingTCPMsg + j, 1);
-                j++;
-            } while(j < 6);
+            // do {
+            //     recvLen = read(it->fd, incomingTCPMsg + j, 1);
+            //     j++;
+            // } while(j < 6);
+            // memcpy(incomingTCPMsg, clientMap.find(newClientName))
+            while(j < 6) {
+                recvLen = read(it->fd, incomingTCPMsg + j, 6 - j);
+                j += recvLen;
+            }
 
             int type = getType(incomingTCPMsg);
 
@@ -776,22 +781,28 @@ void checkConnections()
                 case ESTABLISH_COMM: {
                     int j = 0, recvLen;
                     char newClientNameArr[32];
-                    do {
-                        recvLen = read(it->fd, newClientNameArr + j, 1);
-                        if(newClientNameArr[j] == 0)
-                            break;
-                        j++;
-                    } while(1);
+                    
+                    // do {
+                    //     recvLen = read(it->fd, newClientNameArr + j, 32);
+                    //     if(newClientNameArr[j] == 0)
+                    //         break;
+                    //     j++;
+                    // } while(1);
+                    recvLen = read(it->fd, newClientNameArr, 32);
 
                     std::string newClientName = newClientNameArr;
+
+                    if(clientMap.find(newClientName) == clientMap.end()) {
+                        fprintf(stderr, "!!!!!UNKNOWN USER TRYING TO CONNECT!!!!!\n");
+                        // Close connection
+                        close(it->fd);
+                        it = pollFd.erase(it);
+                        continue;
+                    }
 
                     uint8_t ECM[6];
                     int ECMLen = 6;
                     memcpy(ECM, "P2PI", 4);
-
-                    if(clientMap.find(newClientName) == clientMap.end()) {
-                        dprint("WHO?\n", 0);
-                    }
 
                     if(away == 1 || clientMap.find(newClientName)->second.block) {
                         // Send user unavailable message
@@ -884,10 +895,12 @@ void checkConnections()
                     uint8_t entryCountArr[5];
                     memset(entryCountArr, 0, 5);
 
-                    do {
-                        recvLen = read(it->fd, entryCountArr + j, 1);
-                        j++;
-                    } while(j < 4);
+                    // do {
+                    //     recvLen = read(it->fd, entryCountArr + j, 1);
+                    //     j++;
+                    // } while(j < 4);
+                    recvLen = read(it->fd, entryCountArr, 4);
+
 
                     int entryCount = ntohl(*(uint32_t*)entryCountArr);
 
@@ -898,21 +911,23 @@ void checkConnections()
 
                         int n = 0;
                         // get entry number
-                        do {
-                            recvLen = read(it->fd, entryArr + n, 1);
-                            n++;
-                        } while(n < 4);
+                        // do {
+                        //     recvLen = read(it->fd, entryArr + n, 1);
+                        //     n++;
+                        // } while(n < 4);
+                        recvLen = read(it->fd, entryArr, 4);
 
                         int entryNum = ntohl(*(uint32_t*)entryArr);
                         dprint("entry num is %d\n", entryNum);
 
                         struct Client newClient;
-                        n = 0;
+                        // n = 0;
                         // get udp port
-                        do {
-                            recvLen = read(it->fd, entryArr + 4 + n, 1);
-                            n++;
-                        } while(n < 2);
+                        // do {
+                        //     recvLen = read(it->fd, entryArr + 4 + n, 1);
+                        //     n++;
+                        // } while(n < 2);
+                        recvLen = read(it->fd, entryArr + 4, 2);
 
                         newClient.udpPort = ntohs(*((uint16_t*)entryArr + 2));
                         dprint("udpPort is %d\n", newClient.udpPort);
@@ -933,11 +948,11 @@ void checkConnections()
 
                         n = 0;
                         // get tcp port
-                        do {
-                            recvLen = read(it->fd, entryArr + 6 + n + newClient.hostName.length() + 1, 1);
-
-                            n++;
-                        } while(n < 2);
+                        // do {
+                        //     recvLen = read(it->fd, entryArr + 6 + n + newClient.hostName.length() + 1, 1);
+                        //     n++;
+                        // } while(n < 2);
+                        recvLen = read(it->fd, entryArr + 6 + newClient.hostName.length() + 1, 2);
 
                         newClient.tcpPort = ntohs(*((uint16_t*)(entryArr + 6 + newClient.hostName.length() + 1)));
                         dprint("tcpPort is %d\n", newClient.tcpPort);
@@ -988,10 +1003,34 @@ void checkConnections()
                             dprint("current buffer %s\n", dataBuffer.c_str());
                             j = 0;
                         }
-
                     }
-                    dataBuffer += dataMsg;
+                    dprint("recvLen is %d\n", j);
 
+
+                    // while(1) {
+                    //     printf("Hmmmmm\n");
+                    //     recvLen = read(it->fd, dataMsg, 512);
+                    //     dprint("recvLen %d\n", recvLen);
+                    //     for(int l = 0; l < recvLen; l++) {
+                    //         dprint("%c\n", dataMsg[l]);
+                    //     }
+                    //     if(dataMsg[recvLen - 1] == '\0')
+                    //         break;
+
+                    //     // j++;
+
+                    //     if(recvLen == 512) {
+                    //         dataMsg[512] = '\0';
+                    //         dataBuffer += dataMsg;
+                    //         dprint("current buffer %s\n", dataBuffer.c_str());
+                    //         // j = 0;
+                    //     }
+
+                    // }
+                    // dprint("recvLen is %d\n", recvLen);
+
+                    dataBuffer += dataMsg;
+                    
                     dprint("User %s message.\n", tcpConnMap.find(it->fd)->second.c_str());
                     printf("\r%s>%s\n", tcpConnMap.find(it->fd)->second.c_str(), dataBuffer.c_str());
                     break;
@@ -1141,7 +1180,6 @@ void checkSTDIN()
 						case DISCONNECT:
 						{						
 							if(currentConnection != -1){
-								
 								printf("\nClosing connection\n");
 								
 								uint8_t outgoingTCPMsg[6];
@@ -1170,8 +1208,9 @@ void checkSTDIN()
 								}
 								else{
 									printf("\nCurrent Connection no longer exists");
-									currentConnection = -1;
 								}
+                                currentConnection = -1;
+                                
 							}
 							else
                                 printf("\nConnection must be the current active connection.\n");
