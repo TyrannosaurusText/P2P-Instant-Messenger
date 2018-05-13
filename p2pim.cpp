@@ -1012,14 +1012,19 @@ void checkSTDIN() {
 								break;
 							}
                             terminalprint("Looking for user: %s\n", target.c_str());
-                            if( clientMap.find(target) != clientMap.end() ) {
-                                if(clientMap.find(target)->second.tcpSockFd == -1) {
+							auto client = clientMap.find(target);
+                            if( client != clientMap.end() ) {
+								if(client->second.block) {
+									tprint("User is blocked, unblock to connect.\n")
+									break;
+								}
+                                if(client->second.tcpSockFd == -1) {
 									connectToClient(target);
-                                    currentConnection = clientMap.find(target)->second.tcpSockFd;
+                                    currentConnection = client->second.tcpSockFd;
 								}
 								else{
 									terminalprint("Connected to user: %s\n", target.c_str());
-									currentConnection = clientMap.find(target)->second.tcpSockFd;
+									currentConnection = client->second.tcpSockFd;
 								}
                             }
                             else
@@ -1140,26 +1145,27 @@ void checkSTDIN() {
 								break;
 							}
                             // Find user
-                            if(clientMap.find(target) != clientMap.end()) {
+							auto client = clientMap.find(target);
+                            if(client != clientMap.end()) {
                                 uint8_t outgoingTCPMsg[6];
                                 memcpy(outgoingTCPMsg, "P2PI", 4);
                                 *((uint16_t*)outgoingTCPMsg + 2) = htons(DISCONTINUE_COMM);
 
-                                if(write(clientMap.find(target)->second.tcpSockFd, outgoingTCPMsg, 6) < 0){
+                                if(client->second.tcpSockFd != -1 && write(client->second.tcpSockFd, outgoingTCPMsg, 6) < 0){
                                     die("Failed to send TCP message");
 								}
                                 
-                                clientMap.find(target)->second.block = 1;
+                                client->second.block = 1;
 
-                                close(clientMap.find(target)->second.tcpSockFd);
+                                close(client->second.tcpSockFd);
                                 for(auto it = pollFd.begin(); it != pollFd.end(); it++) {
-                                    if(it->fd == clientMap.find(target)->second.tcpSockFd){
+                                    if(it->fd == client->second.tcpSockFd){
                                         pollFd.erase(it);
                                         break;
                                     }
                                 }
-                                tcpConnMap.erase(clientMap.find(target)->second.tcpSockFd);
-                                clientMap.find(target)->second.tcpSockFd = -1;
+                                tcpConnMap.erase(client->second.tcpSockFd);
+                                client->second.tcpSockFd = -1;
                             }
                             // User not found
                             else
@@ -1238,7 +1244,7 @@ void generateList() {
     for( auto i : clientMap )
     {
         list += "User " + std::to_string(c) + " " + i.second.userName +"@" +
-		i.second.hostName + "on UDP " + std::to_string(i.second.udpPort) + ", TCP " + std::to_string(i.second.tcpPort) + (i.second.block?"Blocked\n":"\n");
+		i.second.hostName + "on UDP " + std::to_string(i.second.udpPort) + ", TCP " + std::to_string(i.second.tcpPort) + (i.second.block?" Blocked\n":"\n");
         c++;
     }
 }
