@@ -45,6 +45,8 @@
 #define SWITCH 6
 #define AWAY 7
 #define UNAWAY 8
+#define BLOCK 9
+#define UNBLOCK 10
 
 void ResetCanonicalMode(int fd, struct termios *savedattributes);
 void SetNonCanonicalMode(int fd, struct termios *savedattributes);
@@ -53,8 +55,6 @@ void die(const char* message);
 int getType(uint8_t* message);
 void getHostNUserName(uint8_t* message, std::string& hostName, std::string& userName);
 void getPorts(uint8_t* message, int& udpPort, int& tcpPort);
-
-
 
 void getHostName();
 void checkIsNum(const char* str);
@@ -66,7 +66,7 @@ void addNewClient(uint8_t* replyMsg);
 void setupSocket();
 void checkUDPPort(int &baseTimeout, int &currTimeout);
 void checkTCPPort(std::string newClientName);
-void checkConnections();
+void checkTCPConnections();
 void sendUDPMessage(int type);
 void checkSTDIN();
 void sendDataMessage(std::string Message);
