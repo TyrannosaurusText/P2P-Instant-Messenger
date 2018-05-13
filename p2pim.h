@@ -31,6 +31,7 @@
     #define dprint(string, ...)
 #endif
 
+
 #define DISCOVERY 1
 #define REPLY 2
 #define CLOSING 3
@@ -71,3 +72,4 @@ void checkSTDIN();
 void sendDataMessage(std::string Message);
 void generateList();
 void clearline();
+int getTarget(std::string &target);
