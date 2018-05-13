@@ -1,31 +1,25 @@
 #include "p2pim.h"
 // #define DEBUG 1
-#ifdef DEBUG
-    #define dprint(string, ...) printf(string,__VA_ARGS__)
-#else
-    #define dprint(string, ...)
-#endif
+
 
 #define MAX_UDP_MSG_LEN (10 + 254 + 32 + 2)
 
-#define terminalFDPOLL 0
-#define udpFDPOLL 1
-#define tcpFDPOLL 2
+
 
 enum Option {USERNAME, UDP_PORT, TCP_PORT, MIN_TIMEOUT, MAX_TIMEOUT, HOST};
+enum Command {CONNECT, LIST, DISCONNECT, GETLIST, HELP, SWITCH, AWAY, UNAWAY, BLOCK, UNBLOCK, EXIT};
 
 struct Client {
     std::string userName;
     std::string hostName;
     int udpPort;
     int tcpPort;
-    sockaddr_in tcpClientAddr;
     int tcpSockFd = -1;
     int block = 0;
     std::string leftOverMsg = "";
 };
 
-struct Host {
+struct Pair {
     std::string hostName;
     int portNum;
 };
@@ -39,18 +33,16 @@ static std::unordered_map<std::string, int> commandMap {
     {"\\connect", CONNECT}, {"\\c", CONNECT}, {"\\switch", SWITCH}, 
     {"\\list", LIST}, {"\\disconnect", DISCONNECT}, {"\\getlist", GETLIST},
     {"\\help", HELP}, {"\\away", AWAY}, {"\\unaway", UNAWAY},
-    {"\\block", BLOCK}, {"\\unblock", UNBLOCK}
+    {"\\block", BLOCK}, {"\\unblock", UNBLOCK}, {"\\exit", EXIT}
 };
 
 std::string userName = getenv("USER");
 std::string hostName;
 int udpPort = 50550;
 int tcpPort = 50551;
-int minTimeout = 5000;
-int maxTimeout = 60000;
-std::string optErr;
-struct in_addr tmpIPAddr, tmpMask;
-
+int gMinTimeout = 5000;
+int gMaxTimeout = 60000;
+struct in_addr gIPAddr, gSubnetMask;
 
 uint8_t outgoingUDPMsg[MAX_UDP_MSG_LEN];
 int outgoingUDPMsgLen;
@@ -58,11 +50,12 @@ std::unordered_map<std::string, struct Client> clientMap;
 std::unordered_map<int, std::string> tcpConnMap;
 
 int udpSockFd, tcpSockFd, enable = 1;
-struct sockaddr_in udpServerAddr, udpClientAddr, tcpServerAddr, tcpClientAddr;
+// struct sockaddr_in udpServerAddr, udpClientAddr, tcpServerAddr, tcpClientAddr;
+struct sockaddr_in udpServerAddr, udpClientAddr, tcpServerAddr;
 socklen_t udpClientAddrLen, tcpClientAddrLen;
 
 std::vector<struct pollfd> pollFd(3);
-std::vector<struct Host> unicastHosts;
+std::vector<struct Pair> unicastHosts;
 
 int away = 0;
 
@@ -71,13 +64,12 @@ struct winsize size;
 char* RX[4]; //stdin buffer
 std::string buffer = "";
 std::string message = "";
-
 int currentConnection = -1;
-
 fd_set set;
-
 struct termios SavedTermAttributes;
 std::string list = "";
+
+
 
 std::unordered_map<std::string, struct Client>::iterator findClientByFd(int fd);
 
@@ -96,7 +88,8 @@ int main(int argc, char** argv) {
     pollFd[udpFDPOLL].events = POLLIN;
     pollFd[tcpFDPOLL].fd = tcpSockFd;
     pollFd[tcpFDPOLL].events = POLLIN;
-    int baseTimeout = minTimeout;
+    
+    int baseTimeout = gMinTimeout;
     timeval start,end;
     int timePassed;
     int currTimeout = 0;
@@ -105,17 +98,16 @@ int main(int argc, char** argv) {
 
     SetNonCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
 
-    // When no host is available and maxTimeout not exceeded, discovery hosts
-    while(baseTimeout <= maxTimeout * 1000) {
+    // When no host is available and gMaxTimeout not exceeded, discovery hosts
+    while(baseTimeout <= gMaxTimeout * 1000) {
         if(currTimeout <= 0) {
             if(clientMap.empty()) {
                 if(!unicastHosts.empty()) {
                     for(auto h : unicastHosts) {
                         // Resolve dns
                         struct hostent* remoteHostEntry = gethostbyname(h.hostName.c_str());
-                        if(!remoteHostEntry) {
+                        if(!remoteHostEntry)
                             die("Failed to resolve host");
-                        }
 
                         struct in_addr remoteAddr;
                         memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
@@ -132,7 +124,7 @@ int main(int argc, char** argv) {
             else
                 currTimeout = -1;
         }
-        //printf("\n");
+
         clearline();      
 		std::string connName;
 		if(tcpConnMap.find(currentConnection) == tcpConnMap.end())
@@ -144,8 +136,8 @@ int main(int argc, char** argv) {
             printf("%s>%s", connName.c_str(), message.substr(message.length()-numcol+connName.length()+1, numcol).c_str());
         else
             printf("%s>%s", connName.c_str(), message.c_str());
+        
         fflush(STDIN_FILENO); 
-
         // Wait for reply message
         gettimeofday(&start, NULL);
         dprint("currtimeout is %d\n", currTimeout);
@@ -161,7 +153,6 @@ int main(int argc, char** argv) {
             dprint("Next iteration at %d\n", currTimeout);
             if(clientMap.empty()) {
                 dprint("TIMEOUT: \n", 0);
-
                 // Double current timeout
                 baseTimeout *= 2;
                 dprint("%d\n", currTimeout);
@@ -175,14 +166,11 @@ int main(int argc, char** argv) {
             // TCP packet
             checkTCPConnections();
             checkSTDIN();
-
         }
         else
-            fprintf(stderr, "POLL ERROR\n");
+            fprintf(stderr, "\nPOLL ERROR\n");
     }
-
     ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
-
     return 0;
 }
 
@@ -194,8 +182,8 @@ printf("\033[XC"); // Move right X column;
 printf("\033[XD"); // Move left X column;
 printf("\033[2J"); // Clear screen
 */
-void optionError(char** argv){
-    fprintf(stderr, "%s: option requires an argument -- '%s'\n", argv[0], optErr.c_str());
+void optionError(char** argv, const char* optErr){
+    fprintf(stderr, "%s: option requires an argument -- '%s'\n", argv[0], optErr);
     ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
     exit(1);
 }
@@ -203,30 +191,30 @@ void optionError(char** argv){
 void getClientName(){
     char buffer[256];
 
-    if(-1 == gethostname(buffer, 255)){
+    // Get hostname
+    if(-1 == gethostname(buffer, 255))
         die("Unable to find local host name.");
-    }
 
     struct hostent* localHostEntry = gethostbyname(buffer);
 
-    if(!localHostEntry) {
+    if(!localHostEntry)
         die("Unable to resolve local host.");
-    }
 
     int found = 0;
     struct ifaddrs *currentIFAddr, *firstIFAddr;
     hostName = localHostEntry->h_name;
-    memcpy(&tmpIPAddr, localHostEntry->h_addr, localHostEntry->h_length);
+    memcpy(&gIPAddr, localHostEntry->h_addr, localHostEntry->h_length);
 
     if(0 > getifaddrs(&firstIFAddr))
         die("Failed to get ifaddr.");
 
     currentIFAddr = firstIFAddr;
 
+    // get subnet mask
     do {
         if(AF_INET == currentIFAddr->ifa_addr->sa_family) {
-            if(0 == memcmp(&((struct sockaddr_in*)currentIFAddr->ifa_addr)->sin_addr, &tmpIPAddr, localHostEntry->h_length)) {
-                memcpy(&tmpMask, &((struct sockaddr_in*)currentIFAddr->ifa_netmask)->sin_addr, localHostEntry->h_length);
+            if(0 == memcmp(&((struct sockaddr_in*)currentIFAddr->ifa_addr)->sin_addr, &gIPAddr, localHostEntry->h_length)) {
+                memcpy(&gSubnetMask, &((struct sockaddr_in*)currentIFAddr->ifa_netmask)->sin_addr, localHostEntry->h_length);
                 found = 1;
                 break;
             }
@@ -237,7 +225,7 @@ void getClientName(){
     freeifaddrs(firstIFAddr);
 
     if(!found) {
-        fprintf(stderr, "Failed to find subnet mask.");
+        fprintf(stderr, "\nFailed to find subnet mask.\n");
         ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
         exit(1);
     }
@@ -256,7 +244,7 @@ int getType(uint8_t* message) {
     return ntohs(*((uint16_t*)message + 2));
 }
 
-void getClientNUserName(uint8_t* message, std::string& hostName, std::string& userName) {
+void getHostNUserName(uint8_t* message, std::string& hostName, std::string& userName) {
     hostName = (char*)(message + 10);
     userName = (char*)(message + 10 + hostName.length() + 1);
 }
@@ -290,11 +278,9 @@ void ResetCanonicalMode(int fd, struct termios *savedattributes) {
 
 void sendUDPMessage(int type) {
     *((uint16_t*)outgoingUDPMsg + 2) = htons(type);
-
-    std::string userName_a, hostName_a;
-    getClientNUserName(outgoingUDPMsg, hostName_a, userName_a);
     dprint("SEND: %d ", type);
 
+    // Unicast
     if(type == REPLY) {
         dprint("SRC - %s : %d ", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
         dprint("DEST - %s : %d\n", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
@@ -303,6 +289,7 @@ void sendUDPMessage(int type) {
             die("Failed to send unicast message");
         }
     }
+    // Broadcast
     else {
         dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
         dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), udpServerAddr.sin_port);
@@ -336,19 +323,14 @@ void SetNonCanonicalMode(int fd, struct termios *savedattributes) {
 // Handler for SIGINT signal
 void SIGINT_handler(int signum) {
     if(signum == SIGINT) {
+        // Send disconnect messages to all connected clients
         for(auto it : clientMap) {
             if(it.second.tcpSockFd != -1) {
-                uint8_t outgoingTCPMsg[6];
-                memcpy(outgoingTCPMsg, "P2PI", 4);
-                *((uint16_t*)outgoingTCPMsg + 2) = htons(DISCONTINUE_COMM);
-
-                if(write(it.second.tcpSockFd, outgoingTCPMsg, 6) < 0)
-                    die("Failed to send TCP message");
-
+                sendTCPMessage(DISCONTINUE_COMM, it.second.tcpSockFd);
                 close(it.second.tcpSockFd);
             }
         }
-
+        // Broadcast closing datagram
         sendUDPMessage(CLOSING);
         close(tcpSockFd);
         close(udpSockFd);
@@ -358,6 +340,7 @@ void SIGINT_handler(int signum) {
 }
 
 void parseOptions(int argc, char** argv) {
+    std::string optErr;
     // Get default hostname, IP, and subnet mask
     getClientName();
 
@@ -365,11 +348,12 @@ void parseOptions(int argc, char** argv) {
     for(int i = 1; i < argc; i++){
         optErr = argv[i];
 
-        // Check if option is valid
+        // Check if it is an option
         if(argv[i][0] == '-') {
             if(optionMap.find(argv[i]) != optionMap.end()) {
+                // Make sure there is an argument provided to the option
                 if(i == argc - 1 || argv[i + 1][0] == '-')
-                        optionError(argv);
+                        optionError(argv, optErr.c_str());
 
                 // Handle options
                 switch(optionMap[argv[i]])
@@ -384,6 +368,12 @@ void parseOptions(int argc, char** argv) {
                         checkIsNum(argv[i + 1]);
                         udpPort = atoi(argv[i + 1]);
                         checkPortRange(udpPort);
+
+                        if(udpPort == tcpPort) {
+                            fprintf(stderr, "Port conflicts!\n");
+                            ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
+                            exit(1);
+                        }
                         break;
                     }
                     case TCP_PORT: {
@@ -402,15 +392,15 @@ void parseOptions(int argc, char** argv) {
                     case MIN_TIMEOUT: {
                         optionMap[argv[i]] = -1;
                         checkIsNum(argv[i + 1]);
-                        minTimeout = atoi(argv[i + 1]);
+                        gMinTimeout = atoi(argv[i + 1]);
                         break;
                     }
                     case MAX_TIMEOUT: {
                         optionMap[argv[i]] = -1;
                         checkIsNum(argv[i + 1]);
-                        maxTimeout = atoi(argv[i + 1]);
+                        gMaxTimeout = atoi(argv[i + 1]);
 
-                        if(maxTimeout < minTimeout) {
+                        if(gMaxTimeout < gMinTimeout) {
                             fprintf(stderr, "Get better with your math!\n");
                             ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
                             exit(1);
@@ -419,9 +409,9 @@ void parseOptions(int argc, char** argv) {
                     }
                     case HOST: {
                         std::string tmpArgv = argv[i + 1];
-
                         // Parse hostname part and port num part
                         std::size_t pos = tmpArgv.find(":");
+                        // If not hostname is provided
                         if(pos <= 0 || pos == tmpArgv.length() - 1) {
                             fprintf(stderr, "Invalid argument %s\n", argv[i + 1]);
                             ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
@@ -432,8 +422,6 @@ void parseOptions(int argc, char** argv) {
                         checkIsNum(tmpPortNumStr.c_str());
 
                         int tmpPortNum = std::stoi(tmpPortNumStr);
-
-                        dprint("%s %d\n", tmpHostName.c_str(), tmpPortNum);
 
                         // Check if host is in local subnet
                         // First resolve host's domain name
@@ -448,8 +436,9 @@ void parseOptions(int argc, char** argv) {
                         memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
                         inet_ntop(AF_INET, &remoteAddr, buf, INET_ADDRSTRLEN);
 
-                        if((remoteAddr.s_addr & tmpMask.s_addr) != (tmpIPAddr.s_addr & tmpMask.s_addr)) {
-                            struct Host newUnicastHost;
+                        // Make sure client is not in the same subnet
+                        if((remoteAddr.s_addr & gSubnetMask.s_addr) != (gIPAddr.s_addr & gSubnetMask.s_addr)) {
+                            struct Pair newUnicastHost;
                             newUnicastHost.hostName = tmpHostName;
                             newUnicastHost.portNum = tmpPortNum;
 
@@ -459,6 +448,7 @@ void parseOptions(int argc, char** argv) {
                     }
                     default: {
                         fprintf(stderr, "PARSE ERROR\n");
+                        ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
                         exit(1);
                         break;
                     }
@@ -466,6 +456,7 @@ void parseOptions(int argc, char** argv) {
             }
             else {
                 fprintf(stderr, "Invalid options %s\n", argv[i]);
+                ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
                 exit(1);
             }
         }
@@ -478,7 +469,7 @@ void initUDPMsg() {
     memset(outgoingUDPMsg, 0, MAX_UDP_MSG_LEN);
 
     memcpy(outgoingUDPMsg, "P2PI", 4);
-    *((uint16_t*)outgoingUDPMsg + 2) = htons(DISCOVERY);
+    // *((uint16_t*)outgoingUDPMsg + 2) = htons(DISCOVERY);
     *((uint16_t*)outgoingUDPMsg + 3) = htons(udpPort);
     *((uint16_t*)outgoingUDPMsg + 4) = htons(tcpPort);
     memcpy(outgoingUDPMsg + 10, hostName.c_str(), hostName.length());
@@ -488,7 +479,7 @@ void initUDPMsg() {
 
 void addNewClient(uint8_t* incomingUDPMsg) {
     struct Client newClient;
-    getClientNUserName(incomingUDPMsg, newClient.hostName, newClient.userName);
+    getHostNUserName(incomingUDPMsg, newClient.hostName, newClient.userName);
     getPorts(incomingUDPMsg, newClient.udpPort, newClient.tcpPort);
 
     // Inserting newClient to map
@@ -499,6 +490,7 @@ void addNewClient(uint8_t* incomingUDPMsg) {
 void connectToClient(std::string clientName) {
     std::unordered_map<std::string, struct Client>::iterator it = clientMap.find(clientName);
     if(it != clientMap.end()) {
+        // Resolve dns
         struct hostent* remoteHostEntry = gethostbyname(it->second.hostName.c_str());
         if(!remoteHostEntry)
             die("Failed to resolve host");
@@ -506,11 +498,10 @@ void connectToClient(std::string clientName) {
         struct in_addr remoteAddr;
         memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
 
-        it->second.tcpClientAddr.sin_family = AF_INET;
-        it->second.tcpClientAddr.sin_addr = remoteAddr;
-        it->second.tcpClientAddr.sin_port = htons(it->second.tcpPort);
-
-        struct sockaddr_in client2ConnetAddr = it->second.tcpClientAddr;
+        struct sockaddr_in client2ConnetAddr;
+        client2ConnetAddr.sin_family = AF_INET;
+        client2ConnetAddr.sin_addr = remoteAddr;
+        client2ConnetAddr.sin_port = htons(it->second.tcpPort);
 
         int newConn = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
         if(0 > connect(newConn, (struct sockaddr *)&client2ConnetAddr, sizeof(client2ConnetAddr)))
@@ -565,11 +556,6 @@ void setupSocket() {
         sizeof(enable)) < 0) {
         die("Failed to set socket option reuse address");
     }
-	// enable = 0;
-	// if(setsockopt(tcpSockFd, SOL_SOCKET, SO_REUSEPORT, &enable,
- //        sizeof(enable)) < 0) {
- //        die("Failed to set socket option reuse address");
- //    }
 
     udpServerAddr.sin_family = AF_INET;
     udpServerAddr.sin_addr.s_addr = htonl(INADDR_ANY);
@@ -603,21 +589,21 @@ void setupSocket() {
     listen(tcpSockFd, 5);
 }
 
-void sendTCPMessage(int type, std::string userName) {
+void sendTCPMessage(int type, int fd) {
     uint8_t outgoingTCPMsg[6];
     memcpy(outgoingTCPMsg, "P2PI", 4);
     *((uint16_t*)outgoingTCPMsg + 2) = htons(type);
-    int fd = clientMap.find(userName)->second.tcpSockFd;
 
-    if(write(fd, outgoingTCPMsg, 6) < 0) {
+    if(write(fd, outgoingTCPMsg, 6) < 0)
         die("Failed to send TCP message");
-    }
 }
 
 void checkTCPPort(std::string newClientName) {
     if(pollFd[tcpFDPOLL].revents == POLLIN) {
         dprint("NEW HOST TRYING TO CONNECT\n", 0);
 
+        struct sockaddr_in tcpClientAddr;
+        socklen_t tcpClientAddrLen = sizeof(tcpClientAddr);
         int newConn = accept(tcpSockFd, (struct sockaddr*)&tcpClientAddr, &tcpClientAddrLen);
 
         dprint("NEW HOST CONNECTED at %d\n", newConn);
@@ -644,7 +630,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
         if(recvLen > 0) {
             int type = getType(incomingUDPMsg);
             std::string userName_a, hostName_a;
-            getClientNUserName(incomingUDPMsg, hostName_a, userName_a);
+            getHostNUserName(incomingUDPMsg, hostName_a, userName_a);
 
             dprint("RECV: %d ", type);
             dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
@@ -659,12 +645,9 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     if(memcmp(incomingUDPMsg + 6, outgoingUDPMsg + 6, outgoingUDPMsgLen - 6)) {
                         // Check if host is already discovered
                         if(clientMap.find(userName_a) == clientMap.end()) {
-                            
                             printf("\r-----NEW HOST: %s-----\n", userName_a.c_str());
-
                             addNewClient(incomingUDPMsg);
                         }
-
                         // Should send reply regardless the host is already known
                         sendUDPMessage(REPLY);
                     }
@@ -673,20 +656,17 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
 
                     break;
                 }
-
                 case REPLY: {
                     // Add host to map if not in map already
                     if(clientMap.find(userName_a) == clientMap.end()) {
                         printf("\r-----NEW HOST: %s-----\n", userName_a.c_str());
                         addNewClient(incomingUDPMsg);
-
                         // Try to initiate tcp connection with host
                         dprint("%s\n", clientMap.begin()->first.c_str());
                         // connectToClient(clientMap.begin()->first);
                     }
                     break;
                 }
-
                 case CLOSING: {
                     // Remove host from map
                     std::unordered_map<std::string, struct Client>::iterator it = clientMap.find(userName_a);
@@ -698,15 +678,12 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
 
                         clientMap.erase(it);
                     }
-
                     // If no more host is available, go back to discovery
                     if(clientMap.empty()) {
                         dprint("CLOSING...\n", 0);
-
                         currTimeout = 0;
-
                         // Resets timeout value
-                        baseTimeout = minTimeout;
+                        baseTimeout = gMinTimeout;
                         dprint("basetimeout is %d\n", baseTimeout);
                     }
                     break;
@@ -725,11 +702,6 @@ void checkTCPConnections() {
             memset(incomingTCPMsg, 0, 518);
             int recvLen, j = 0;
 
-            // do {
-            //     recvLen = read(it->fd, incomingTCPMsg + j, 1);
-            //     j++;
-            // } while(j < 6);
-            // memcpy(incomingTCPMsg, clientMap.find(newClientName))
             while(j < 6) {
                 recvLen = read(it->fd, incomingTCPMsg + j, 6 - j);
                 j += recvLen;
@@ -746,18 +718,19 @@ void checkTCPConnections() {
                     int j = 0, recvLen;
                     char newClientNameArr[32];
                     
-                    // do {
-                    //     recvLen = read(it->fd, newClientNameArr + j, 32);
-                    //     if(newClientNameArr[j] == 0)
-                    //         break;
-                    //     j++;
-                    // } while(1);
-                    recvLen = read(it->fd, newClientNameArr, 32);
+                    // Read until the first null byte
+                    do {
+                        recvLen = read(it->fd, newClientNameArr + j, 1);
+                        if(newClientNameArr[j] == 0)
+                            break;
+                        j++;
+                    } while(1);
+                    // recvLen = read(it->fd, newClientNameArr, 32);
 
                     std::string newClientName = newClientNameArr;
 
                     if(clientMap.find(newClientName) == clientMap.end()) {
-                        fprintf(stderr, "!!!!!UNKNOWN USER TRYING TO CONNECT!!!!!\n");
+                        fprintf(stderr, "\n!!!!!UNKNOWN USER TRYING TO CONNECT!!!!!\n");
                         // Close connection
                         close(it->fd);
                         it = pollFd.erase(it);
@@ -868,32 +841,18 @@ void checkTCPConnections() {
 
                     uint8_t entryArr[8 + 256 + 32 + 2];
                     for(int k = 0; k < entryCount; k++) {
-
-                        int n = 0;
-                        // get entry number
-                        // do {
-                        //     recvLen = read(it->fd, entryArr + n, 1);
-                        //     n++;
-                        // } while(n < 4);
+                        // Get entry number
                         recvLen = read(it->fd, entryArr, 4);
-
                         int entryNum = ntohl(*(uint32_t*)entryArr);
                         dprint("entry num is %d\n", entryNum);
 
                         struct Client newClient;
-                        // n = 0;
-                        // get udp port
-                        // do {
-                        //     recvLen = read(it->fd, entryArr + 4 + n, 1);
-                        //     n++;
-                        // } while(n < 2);
                         recvLen = read(it->fd, entryArr + 4, 2);
-
                         newClient.udpPort = ntohs(*((uint16_t*)entryArr + 2));
                         dprint("udpPort is %d\n", newClient.udpPort);
 
-                        n = 0;
-                        // get hostname
+                        int n = 0;
+                        // Get hostname up to the first null byte
                         do {
                             recvLen = read(it->fd, entryArr + 6 + n, 1);
                             dprint("%d %c\n", n, *(char*)(entryArr + 6 + n));
@@ -904,16 +863,7 @@ void checkTCPConnections() {
 
                         newClient.hostName = (char*)(entryArr + 6);
                         dprint("hostname is %s\n", newClient.hostName.c_str());
-
-
-                        n = 0;
-                        // get tcp port
-                        // do {
-                        //     recvLen = read(it->fd, entryArr + 6 + n + newClient.hostName.length() + 1, 1);
-                        //     n++;
-                        // } while(n < 2);
                         recvLen = read(it->fd, entryArr + 6 + newClient.hostName.length() + 1, 2);
-
                         newClient.tcpPort = ntohs(*((uint16_t*)(entryArr + 6 + newClient.hostName.length() + 1)));
                         dprint("tcpPort is %d\n", newClient.tcpPort);
 
@@ -932,18 +882,13 @@ void checkTCPConnections() {
 
                         // printf("username %s, hostname %s, tcp %d, udp %d\n", newClient.userName.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
 
-                        if(newClient.userName != userName && clientMap.find(newClient.userName) == clientMap.end()) {
+                        if(newClient.userName != userName && clientMap.find(newClient.userName) == clientMap.end())
                             clientMap[newClient.userName] = newClient;
-                        }
                     }
-
                     generateList();
                     printf("\n%s\n", list.c_str());
-
                     break;
                 }
-
-               
                 case DATA: {
                     // Read in data
                     int j = 0, recvLen;
@@ -954,9 +899,7 @@ void checkTCPConnections() {
                         recvLen = read(it->fd, dataMsg + j, 1);
                         if(dataMsg[j] == '\0')
                             break;
-
                         j++;
-
                         if(j == 512) {
                             dataMsg[j] = '\0';
                             dataBuffer += dataMsg;
@@ -1014,7 +957,7 @@ void checkTCPConnections() {
                     continue;
                 }
                 default: {
-                    dprint("WHAT IS HAPPENING?\n", 0);
+                    fprintf(stderr, "\nINVALID MESSAGE\n", 0);
                     break;
                 }
             }
@@ -1244,6 +1187,10 @@ void checkSTDIN() {
                                 printf("\nUser %s not found. \n", target.c_str());
                             
                             break;
+                        }
+                        case EXIT: {
+                            printf("\nBye...\n");
+                            raise(SIGINT);
                         }
 					}
                 }

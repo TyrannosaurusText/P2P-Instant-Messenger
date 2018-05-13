@@ -25,6 +25,11 @@
 #include <vector>
 #include <sys/ioctl.h>
 
+#ifdef DEBUG
+    #define dprint(string, ...) printf(string,__VA_ARGS__)
+#else
+    #define dprint(string, ...)
+#endif
 
 #define DISCOVERY 1
 #define REPLY 2
@@ -37,20 +42,13 @@
 #define DATA 9
 #define DISCONTINUE_COMM 10
 
-#define CONNECT 1
-#define LIST 2
-#define DISCONNECT 3
-#define GETLIST 4
-#define HELP 5
-#define SWITCH 6
-#define AWAY 7
-#define UNAWAY 8
-#define BLOCK 9
-#define UNBLOCK 10
+#define terminalFDPOLL 0
+#define udpFDPOLL 1
+#define tcpFDPOLL 2
 
 void ResetCanonicalMode(int fd, struct termios *savedattributes);
 void SetNonCanonicalMode(int fd, struct termios *savedattributes);
-void optionError(char** argv);
+void optionError(char** argv, const char* optErr);
 void die(const char* message);
 int getType(uint8_t* message);
 void getHostNUserName(uint8_t* message, std::string& hostName, std::string& userName);
@@ -68,6 +66,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout);
 void checkTCPPort(std::string newClientName);
 void checkTCPConnections();
 void sendUDPMessage(int type);
+void sendTCPMessage(int type, int fd);
 void checkSTDIN();
 void sendDataMessage(std::string Message);
 void generateList();
