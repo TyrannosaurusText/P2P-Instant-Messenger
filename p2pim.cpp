@@ -631,7 +631,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
         recvLen = recvfrom(udpSockFd, incomingUDPMsg, MAX_UDP_MSG_LEN, 0,
             (struct sockaddr*)&udpClientAddr, &udpClientAddrLen);
 
-        if(recvLen > 0) {
+        if(recvLen > 4 && memcmp("P2PI", incomingUDPMsg, 4) == 0) {
             int type = getType(incomingUDPMsg);
             std::string userName_a, hostName_a;
             getHostNUserName(incomingUDPMsg, hostName_a, userName_a);
@@ -709,6 +709,22 @@ void checkTCPConnections() {
             while(j < 6) {
                 recvLen = read(it->fd, incomingTCPMsg + j, 6 - j);
                 j += recvLen;
+            }
+
+            // Invalid signature, close connection
+            if(memcmp("P2PI", incomingTCPMsg, 4) != 0) {
+                sendTCPMessage(DISCONTINUE_COMM, it->fd);
+
+                if(findClientByFd(it->fd) != clientMap.end())
+                        findClientByFd(it->fd)->second.tcpSockFd = -1;
+                tcpConnMap.erase(tcpConnMap.find(it->fd));
+
+                if(it->fd == currentConnection) {
+                    currentConnection = -1;
+                }
+
+                close(it->fd);
+                it = pollFd.erase(it);
             }
 
             int type = getType(incomingTCPMsg);
@@ -1053,7 +1069,7 @@ void checkSTDIN() {
 						}
 						case SWITCH: {							
 							std::string target;
-							if(-1==getTarget(target))
+							if(-1 == getTarget(target))
 							{
 								tprint("No users specified.\n");
 								break;
@@ -1067,7 +1083,7 @@ void checkSTDIN() {
 						}
 						case DISCONNECT: {						
 							if(currentConnection != -1){
-								tprint("Closing connection\n");
+								terminalprint("Closing connection with %s\n", tcpConnMap.find(currentConnection)->second.c_str());
 								
 								uint8_t outgoingTCPMsg[6];
 								memcpy(outgoingTCPMsg, "P2PI", 4);
@@ -1106,7 +1122,16 @@ void checkSTDIN() {
                             break;
                         }
                         case HELP: {
-                            tprint("List of Commands:\n\\connect username \n\t-establishes connection to a user\n\\disconnect \n\t-closes communication channel between current connection \n\\switch user \n\t-redirect messages to the specified user if a connection\n\t has been established. \n\\getlist \n\t-gets the list of users from current connection \n\\list \n\t-gets your current userlist\n\\help\n\t-it's a mystery\n\\away \n\t-Sets self to away\n\\unaway\n\t-brings self back from away.\n");
+                            tprint("List of Commands:\n\\connect username \n\t-establishes connection to a user\n");
+                            tprint("\\disconnect \n\t-closes communication channel between current connection\n");
+                            tprint("\\switch username \n\t-redirect messages to the specified user if a connection\n\t has been established\n");
+                            tprint("\\getlist \n\t-gets the list of users from current connection\n");
+                            tprint("\\list \n\t-gets your current userlist\n");
+                            tprint("\\help\n\t-it's a mystery\n");
+                            tprint("\\away \n\t-sets self to away\n");
+                            tprint("\\unaway\n\t-brings self back from away.\n");
+                            tprint("\\block username\n\t-when you don't want to talk to that person\n");
+                            tprint("\\unblock username\n\t-when you want to become friend with someone again\n");
                             break;
                         }
 						
@@ -1139,7 +1164,7 @@ void checkSTDIN() {
 
                         case BLOCK: {
 							std::string target;
-							if(-1==getTarget(target))
+							if(-1 == getTarget(target))
 							{
 								tprint("No users specified.\n");
 								break;
@@ -1165,6 +1190,9 @@ void checkSTDIN() {
                                     }
                                 }
                                 tcpConnMap.erase(client->second.tcpSockFd);
+                                if(currentConnection == client->second.tcpSockFd) {
+                                    currentConnection = -1;
+                                }
                                 client->second.tcpSockFd = -1;
                             }
                             // User not found
@@ -1244,7 +1272,7 @@ void generateList() {
     for( auto i : clientMap )
     {
         list += "User " + std::to_string(c) + " " + i.second.userName +"@" +
-		i.second.hostName + "on UDP " + std::to_string(i.second.udpPort) + ", TCP " + std::to_string(i.second.tcpPort) + (i.second.block?" Blocked\n":"\n");
+		i.second.hostName + " on UDP " + std::to_string(i.second.udpPort) + ", TCP " + std::to_string(i.second.tcpPort) + (i.second.block ? " Blocked\n" : "") + (i.second.tcpSockFd != -1 ? " Connected\n" : "\n");
         c++;
     }
 }
