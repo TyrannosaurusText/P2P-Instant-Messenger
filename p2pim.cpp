@@ -126,7 +126,7 @@ int main(int argc, char** argv) {
             else
                 currTimeout = -1;
         }
-/* 
+ 
         clearline();      
 		std::string connName;
 		if(tcpConnMap.find(currentConnection) == tcpConnMap.end())
@@ -140,7 +140,7 @@ int main(int argc, char** argv) {
         }
 		else
             printf("%s>%s", connName.c_str(), message.c_str());
-         */
+
         fflush(STDIN_FILENO); 
         // Wait for reply message
         gettimeofday(&start, NULL);
@@ -338,6 +338,7 @@ void SIGINT_handler(int signum) {
         sendUDPMessage(CLOSING);
         close(tcpSockFd);
         close(udpSockFd);
+        tprint("Bye...\n");
         ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
         exit(0);
     }
@@ -1218,7 +1219,6 @@ void checkSTDIN() {
                             break;
                         }
                         case EXIT: {
-                            tprint("Bye...");
                             raise(SIGINT);
                         }
 					}
