@@ -751,7 +751,9 @@ void checkTCPConnections() {
                     std::string newClientName = newClientNameArr;
 
                     if(clientMap.find(newClientName) == clientMap.end()) {
-                        fprintf(stderr, "\n!!!!!UNKNOWN USER TRYING TO CONNECT!!!!!\n");
+                        // fprintf(stderr, "\n!!!!!UNKNOWN USER TRYING TO CONNECT!!!!!\n");
+                        sendTCPMessage(USER_UNAVALIBLE, it->fd);
+
                         // Close connection
                         close(it->fd);
                         it = pollFd.erase(it);
