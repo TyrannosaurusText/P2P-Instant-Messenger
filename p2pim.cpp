@@ -39,6 +39,7 @@ static std::unordered_map<std::string, int> commandMap {
 
 std::string userName = getenv("USER");
 std::string hostName;
+std::string password;
 int udpPort = 50550;
 int tcpPort = 50551;
 int gMinTimeout = 5000;
@@ -95,10 +96,13 @@ int main(int argc, char** argv) {
     int timePassed;
     int currTimeout = 0;
 
-    tprint("Please type in \"\\help\" for a list of commands available\n");
 
     SetNonCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
 
+	prompt();
+	
+    //tprint("Please type in \"\\help\" for a list of commands available\n");
+	
     // When no host is available and gMaxTimeout not exceeded, discovery hosts
     while(baseTimeout <= gMaxTimeout * 1000) {
         if(currTimeout <= 0) {
@@ -1296,4 +1300,66 @@ int getTarget(std::string &target)
 
 void clearline() {
     printf("\33[2K\r");
+}
+
+void prompt()
+{
+	tprint("Enter password for %s>", userName.c_str());
+	fflush(STDIN_FILENO);
+	std::string passwordmask = "";
+	while(1){
+	
+	poll(pollFd.data(), 1, 5000);
+	if(pollFd[terminalFDPOLL].revents & POLLIN) {
+        ioctl(STDOUT_FILENO,TIOCGWINSZ,&size);
+        numcol = size.ws_col; //size of the terminal (column size)
+        bytesRead = read(STDIN_FILENO, &RX, 4);
+        if (bytesRead < 2)
+        buffer.append((const char*)RX);
+        //dprint("buffer len: %d\n", buffer.length());
+        //dprint("buffer: %c\n", buffer[0]);
+        if(bytesRead == 1) {
+            //tprint("%c",buffer[0]);
+            fflush(STDIN_FILENO);
+
+            if(buffer[0] == 0x7F) { //delete char
+                if(password.length() > 0) {
+                    password.erase(password.length()-1);
+                    passwordmask.erase(passwordmask.length()-1);
+                    printf("\033[1D  "); //clears current and next char in terminal
+
+                }
+            }
+			else if(buffer[0] == 0x1B)
+			{
+				tprint("User requested exit!\n");
+				ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
+				exit(0);
+			}
+            else if(buffer[0] != '\n'){
+                password += buffer[0];
+				passwordmask += '*';
+			}
+			else //(buffer[0] == '\n')
+			{
+				dprint("Exposing your password: %s\n", password.c_str());
+				tprint("Logging in...\n");
+				break;
+			}
+			
+		}
+        clearline();
+		std::string connName;
+		if(tcpConnMap.find(currentConnection) == tcpConnMap.end())
+			connName = "";
+		else
+			connName = tcpConnMap.find(currentConnection)->second;
+
+		printf("Enter password for %s>%s",userName.c_str(), passwordmask.c_str());
+		
+        //printf("\033[0C");
+        fflush(STDIN_FILENO);
+        buffer.clear();
+		}
+	}
 }
