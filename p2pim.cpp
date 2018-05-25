@@ -41,6 +41,7 @@ static std::unordered_map<std::string, int> commandMap {
 
 std::string userName = getenv("USER");
 std::string hostName;
+std::string password;
 int udpPort = 50550;
 int tcpPort = 50551;
 int taUDPPort = 50552;
@@ -103,10 +104,13 @@ int main(int argc, char** argv) {
     int timePassed;
     int currTimeout = 0;
 
-    tprint("Please type in \"\\help\" for a list of commands available\n");
 
     SetNonCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
 
+	prompt();
+	
+    //tprint("Please type in \"\\help\" for a list of commands available\n");
+	
     // When no host is available and gMaxTimeout not exceeded, discovery hosts
     while(baseTimeout <= gMaxTimeout * 1000) {
         if(currTimeout <= 0) {
@@ -301,7 +305,7 @@ void die(const char *message) {
 }
 
 int getType(uint8_t* message) {
-    return ntohs(*((uint16_t*)message + 2));
+    return ntohs(*((uint16_t*)(message + 4)));
 }
 
 void getHostNUserName(uint8_t* message, std::string& hostName, std::string& userName) {
@@ -310,8 +314,8 @@ void getHostNUserName(uint8_t* message, std::string& hostName, std::string& user
 }
 
 void getPorts(uint8_t* message, int& udpPort, int& tcpPort) {
-    udpPort = ntohs(*((uint16_t*)message + 3));
-    tcpPort = ntohs(*((uint16_t*)message + 4));
+    udpPort = ntohs(*((uint16_t*)(message + 6)));
+    tcpPort = ntohs(*((uint16_t*)(message + 8)));
 }
 
 void checkIsNum(const char* str) {
@@ -337,7 +341,7 @@ void ResetCanonicalMode(int fd, struct termios *savedattributes) {
 }
 
 void sendUDPMessage(int type) {
-    *((uint16_t*)outgoingUDPMsg + 2) = htons(type);
+    *((uint16_t*)(outgoingUDPMsg + 4)) = htons(type);
     dprint("SEND: %d ", type);
 
     // Unicast
@@ -559,8 +563,8 @@ void initUDPMsg() {
 
     memcpy(outgoingUDPMsg, "P2PI", 4);
     // *((uint16_t*)outgoingUDPMsg + 2) = htons(DISCOVERY);
-    *((uint16_t*)outgoingUDPMsg + 3) = htons(udpPort);
-    *((uint16_t*)outgoingUDPMsg + 4) = htons(tcpPort);
+    *((uint16_t*)(outgoingUDPMsg + 6)) = htons(udpPort);
+    *((uint16_t*)(outgoingUDPMsg + 8)) = htons(tcpPort);
     memcpy(outgoingUDPMsg + 10, hostName.c_str(), hostName.length());
     memcpy(outgoingUDPMsg + 10 + hostName.length() + 1, userName.c_str(),
         userName.length());
@@ -604,8 +608,8 @@ void connectToClient(std::string clientName) {
 
         memset(ECM, 0, ECMLen);
         memcpy(ECM, "P2PI", 4);
-        *((uint16_t*)ECM + 2) = htons(ESTABLISH_COMM);
-        memcpy((uint16_t*)ECM + 3, userName.c_str(), userName.length());
+        *((uint16_t*)(ECM + 4)) = htons(ESTABLISH_COMM);
+        memcpy((uint16_t*)(ECM + 6), userName.c_str(), userName.length());
         dprint("New client name is %s\n", userName.c_str());
 
         if(write(newConn, ECM, ECMLen) < 0)
@@ -681,7 +685,7 @@ void setupSocket() {
 void sendTCPMessage(int type, int fd) {
     uint8_t outgoingTCPMsg[6];
     memcpy(outgoingTCPMsg, "P2PI", 4);
-    *((uint16_t*)outgoingTCPMsg + 2) = htons(type);
+    *((uint16_t*)(outgoingTCPMsg + 4)) = htons(type);
 
     if(write(fd, outgoingTCPMsg, 6) < 0)
         die("Failed to send TCP message");
@@ -866,7 +870,7 @@ void checkTCPConnections() {
 
                     if(away == 1 || clientMap.find(newClientName)->second.block) {
                         // Send user unavailable message
-                        *((uint16_t*)ECM + 2) = htons(USER_UNAVALIBLE);
+                        *((uint16_t*)(ECM + 4)) = htons(USER_UNAVALIBLE);
                         if(write(it->fd, ECM, 6) < 0) {
                             die("Failed to establish TCP connection.");
                         }
@@ -878,7 +882,7 @@ void checkTCPConnections() {
                     }
                     else {
                         // Send accept comm message
-                        *((uint16_t*)ECM + 2) = htons(ACCEPT_COMM);
+                        *((uint16_t*)(ECM + 4)) = htons(ACCEPT_COMM);
                         clientMap.find(newClientName)->second.tcpSockFd = it->fd;
                         tcpConnMap[it->fd] = newClientName;
                         if(write(it->fd, ECM, 6) < 0) {
@@ -914,8 +918,8 @@ void checkTCPConnections() {
                     dprint("hi\n");
                     uint8_t ECM[10];
                     memcpy(ECM, "P2PI", 4);
-                    *((uint16_t*)ECM + 2) = htons(REPLY_USER_LIST);
-                    *((uint32_t*)((uint16_t*)ECM + 3)) = htonl(clientMap.size());
+                    *((uint16_t*)(ECM + 4)) = htons(REPLY_USER_LIST);
+                    *((uint32_t*)(ECM + 6)) = htonl(clientMap.size());
 
                     if(0 > write(it->fd, ECM, 10))
                         die("Failed to send user list reply");
@@ -927,7 +931,7 @@ void checkTCPConnections() {
 
                         int len2Send = 6;
                         *((uint32_t*)userEntry) = htonl(i);
-                        *((uint16_t*)userEntry + 2) = htons(c.second.udpPort);
+                        *((uint16_t*)(userEntry + 4)) = htons(c.second.udpPort);
                         memcpy(userEntry + 6, c.second.hostName.c_str(), c.second.hostName.length());
                         len2Send += c.second.hostName.length() + 1;
 
@@ -971,7 +975,7 @@ void checkTCPConnections() {
 
                         struct Client newClient;
                         recvLen = read(it->fd, entryArr + 4, 2);
-                        newClient.udpPort = ntohs(*((uint16_t*)entryArr + 2));
+                        newClient.udpPort = ntohs(*((uint16_t*)(entryArr + 4)));
                         dprint("udpPort is %d\n", newClient.udpPort);
 
                         int n = 0;
@@ -1190,7 +1194,7 @@ void checkSTDIN() {
 								
 								uint8_t outgoingTCPMsg[6];
 								memcpy(outgoingTCPMsg, "P2PI", 4);
-								*((uint16_t*)outgoingTCPMsg + 2) = htons(DISCONTINUE_COMM);
+								*((uint16_t*)(outgoingTCPMsg + 4)) = htons(DISCONTINUE_COMM);
 
 								if(write(currentConnection, outgoingTCPMsg, 6) < 0){
 									die("Failed to send TCP message.");
@@ -1244,7 +1248,7 @@ void checkSTDIN() {
                             for(auto c: tcpConnMap) {
                                 uint8_t outgoingTCPMsg[6];
                                 memcpy(outgoingTCPMsg, "P2PI", 4);
-                                *((uint16_t*)outgoingTCPMsg + 2) = htons(USER_UNAVALIBLE);
+                                *((uint16_t*)(outgoingTCPMsg + 4)) = htons(USER_UNAVALIBLE);
 
                                 if(write(c.first, outgoingTCPMsg, 6) < 0){
 									die("Failed to send away message.\n");
@@ -1277,7 +1281,7 @@ void checkSTDIN() {
                             if(client != clientMap.end()) {
                                 uint8_t outgoingTCPMsg[6];
                                 memcpy(outgoingTCPMsg, "P2PI", 4);
-                                *((uint16_t*)outgoingTCPMsg + 2) = htons(DISCONTINUE_COMM);
+                                *((uint16_t*)(outgoingTCPMsg + 4)) = htons(DISCONTINUE_COMM);
 
                                 if(client->second.tcpSockFd != -1 && write(client->second.tcpSockFd, outgoingTCPMsg, 6) < 0){
                                     die("Failed to send TCP message");
@@ -1397,4 +1401,66 @@ int getTarget(std::string &target)
 
 void clearline() {
     printf("\33[2K\r");
+}
+
+void prompt()
+{
+	tprint("Enter password for %s>", userName.c_str());
+	fflush(STDIN_FILENO);
+	std::string passwordmask = "";
+	while(1){
+	
+	poll(pollFd.data(), 1, 5000);
+	if(pollFd[terminalFDPOLL].revents & POLLIN) {
+        ioctl(STDOUT_FILENO,TIOCGWINSZ,&size);
+        numcol = size.ws_col; //size of the terminal (column size)
+        bytesRead = read(STDIN_FILENO, &RX, 4);
+        if (bytesRead < 2)
+        buffer.append((const char*)RX);
+        //dprint("buffer len: %d\n", buffer.length());
+        //dprint("buffer: %c\n", buffer[0]);
+        if(bytesRead == 1) {
+            //tprint("%c",buffer[0]);
+            fflush(STDIN_FILENO);
+
+            if(buffer[0] == 0x7F) { //delete char
+                if(password.length() > 0) {
+                    password.erase(password.length()-1);
+                    passwordmask.erase(passwordmask.length()-1);
+                    printf("\033[1D  "); //clears current and next char in terminal
+
+                }
+            }
+			else if(buffer[0] == 0x1B)
+			{
+				tprint("User requested exit!\n");
+				ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
+				exit(0);
+			}
+            else if(buffer[0] != '\n'){
+                password += buffer[0];
+				passwordmask += '*';
+			}
+			else //(buffer[0] == '\n')
+			{
+				dprint("Exposing your password: %s\n", password.c_str());
+				tprint("Logging in...\n");
+				break;
+			}
+			
+		}
+        clearline();
+		std::string connName;
+		if(tcpConnMap.find(currentConnection) == tcpConnMap.end())
+			connName = "";
+		else
+			connName = tcpConnMap.find(currentConnection)->second;
+
+		printf("Enter password for %s>%s",userName.c_str(), passwordmask.c_str());
+		
+        //printf("\033[0C");
+        fflush(STDIN_FILENO);
+        buffer.clear();
+		}
+	}
 }
