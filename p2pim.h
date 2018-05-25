@@ -9,11 +9,11 @@
 #include <unordered_map>
 #include <arpa/inet.h>
 #include <sys/types.h>
-#include <string.h> 
+#include <string.h>
 #include <ifaddrs.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <netdb.h> 
+#include <netdb.h>
 #include <ifaddrs.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -42,8 +42,8 @@
 #define REPLY_USER_LIST 8
 #define DATA 9
 #define DISCONTINUE_COMM 10
-#define REQUEST_AUTH_KEY 16
-#define REPLY_AUTH_KEY 17
+#define REQUEST_AUTH_KEY 0x10
+#define REPLY_AUTH_KEY 0x11
 
 #define terminalFDPOLL 0
 #define udpFDPOLL 1

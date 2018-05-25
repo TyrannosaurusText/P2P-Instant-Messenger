@@ -28,11 +28,11 @@ struct Pair {
 
 static std::unordered_map<std::string, int> optionMap {
     {"-u", USERNAME}, {"-up", UDP_PORT}, {"-tp", TCP_PORT},
-    {"-dt", MIN_TIMEOUT}, {"-dm", MAX_TIMEOUT}, {"-pp", HOST}, {"ap", TA_UDP_PORT}, {"ah", AUTH_HOST}
+    {"-dt", MIN_TIMEOUT}, {"-dm", MAX_TIMEOUT}, {"-pp", HOST}, {"-ap", TA_UDP_PORT}, {"-ah", AUTH_HOST}
 };
 
 static std::unordered_map<std::string, int> commandMap {
-    {"\\connect", CONNECT}, {"\\c", CONNECT}, {"\\switch", SWITCH}, 
+    {"\\connect", CONNECT}, {"\\c", CONNECT}, {"\\switch", SWITCH},
     {"\\list", LIST}, {"\\disconnect", DISCONNECT}, {"\\getlist", GETLIST},
     {"\\help", HELP}, {"\\away", AWAY}, {"\\unaway", UNAWAY},
     {"\\block", BLOCK}, {"\\unblock", UNBLOCK}, {"\\exit", EXIT}
@@ -98,7 +98,7 @@ int main(int argc, char** argv) {
     pollFd[udpFDPOLL].events = POLLIN;
     pollFd[tcpFDPOLL].fd = tcpSockFd;
     pollFd[tcpFDPOLL].events = POLLIN;
-    
+
     int baseTimeout = gMinTimeout;
     timeval start,end;
     int timePassed;
@@ -108,9 +108,9 @@ int main(int argc, char** argv) {
     SetNonCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
 
 	prompt();
-	
+
     //tprint("Please type in \"\\help\" for a list of commands available\n");
-	
+
     // When no host is available and gMaxTimeout not exceeded, discovery hosts
     while(baseTimeout <= gMaxTimeout * 1000) {
         if(currTimeout <= 0) {
@@ -142,11 +142,12 @@ int main(int argc, char** argv) {
                     memcpy(reqAuthMsg, "P2PI", 4);
                     *((uint16_t*)(reqAuthMsg + 4)) = htons(REQUEST_AUTH_KEY);
 
+                    secretNum = 0;
                     // Generating random
-                    secretNum = GenerateRandomValue();
+                    // secretNum = GenerateRandomValue();
 
-                    while(secretNum == 0)
-                        secretNum = GenerateRandomValue();
+                    // while(secretNum == 0)
+                        // secretNum = GenerateRandomValue();
 
                     uint64_t secretData = secretNum;
 
@@ -160,13 +161,16 @@ int main(int argc, char** argv) {
 
                     // if there is a trust anchor specified
                     if(!taVector.empty()) {
+                        tprint("Unicasting\n");
+
                         struct sockaddr_in taAddr = *taVector.begin();
-                        if(sendto(udpSockFd, reqAuthMsg, reqAuthMsgLen, 0, (struct sockaddr*)&taAddr, sizeof(*taVector.begin()))) {
+                        if(sendto(udpSockFd, reqAuthMsg, reqAuthMsgLen, 0, (struct sockaddr*)&taAddr, sizeof(*taVector.begin())) < 0) {
                             die("Failed to unicast trust anchor discovery");
                         }
                     }
                     // else, broadcast
                     else {
+                        tprint("Broadcasting\n");
                         // change dest port to trust anchor udp port
                         udpServerAddr.sin_port = htons(taUDPPort);
                         udpServerAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
@@ -186,8 +190,8 @@ int main(int argc, char** argv) {
             else
                 currTimeout = -1;
         }
- 
-        clearline();      
+
+        clearline();
 		std::string connName;
 		if(tcpConnMap.find(currentConnection) == tcpConnMap.end())
 			connName = "";
@@ -201,7 +205,7 @@ int main(int argc, char** argv) {
 		else
             printf("%s>%s", connName.c_str(), message.c_str());
 
-        fflush(STDIN_FILENO); 
+        fflush(STDIN_FILENO);
         // Wait for reply message
         gettimeofday(&start, NULL);
         dprint("currtimeout is %d\n", currTimeout);
@@ -517,26 +521,47 @@ void parseOptions(int argc, char** argv) {
                         optionMap[argv[i]] = -1;
                         checkIsNum(argv[i + 1]);
                         checkPortRange(atoi(argv[i + 1]));
-                        
+
                         if(!isAHPort)
                             taUDPPort = atoi(argv[i + 1]);
 
                         break;
                     }
                     case AUTH_HOST: {
-                        // std::string tmpArgv = argv[i + 1];
-                        // // Parse hostname part and port num part
-                        // std::size_t pos = tmpArgv.find(":");
-                        // // If not hostname is provided
-                        // if(pos == 0 || pos == tmpArgv.length() - 1) {
-                        //     fprintf(stderr, "Invalid argument %s\n", argv[i + 1]);
-                        //     ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
-                        //     exit(1);
-                        // }
-                        // else {
+                        std::string tmpArgv = argv[i + 1];
+                        // Parse hostname part and port num part
+                        std::size_t pos = tmpArgv.find(":");
+                        tprint("pos is %lu\n", pos);
+                        // If not hostname is provided
+                        if(pos == 0 || pos == tmpArgv.length() - 1) {
+                            die("Invalid argument -ah");
+                        }
+                        else {
+                            std::string taHost = argv[i + 1];
+                            tprint("taHost is %s\n", taHost.c_str());
+                            
 
-                        //     if(pos < 0)
-                        // }
+                            // If port number is provided
+                            if(pos != std::string::npos) {
+                                std::string taUDPPortStr = taHost.substr(pos + 1);
+                                checkIsNum(taUDPPortStr.c_str());
+                                taHost = taHost.substr(0, pos);
+                                taUDPPort = std::stoi(taUDPPortStr);
+                            }
+
+                            struct hostent* remoteHostEntry = gethostbyname(taHost.c_str());
+                            if(!remoteHostEntry)
+                                die("Failed to resolve host");
+
+                            struct in_addr remoteAddr;
+                            struct sockaddr_in trustAnchorAddr;
+                            memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
+                            trustAnchorAddr.sin_addr = remoteAddr;
+                            trustAnchorAddr.sin_port = htons(taUDPPort);
+                            trustAnchorAddr.sin_family = AF_INET;
+
+                            taVector.push_back(trustAnchorAddr);
+                        }
                         break;
                     }
                     default: {
@@ -728,7 +753,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
             dprint("RECV: %d ", type);
             dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
             dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
-           
+
             switch (type) {
                 case DISCOVERY: {
                     // Add host to clientMap if not self discovery and not in
@@ -782,7 +807,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     break;
                 }
                 case REPLY_AUTH_KEY: {
-                    dprint("hi\n");
+                    tprint("hi\n");
                     if(!memcmp(incomingUDPMsg + 6, reqAuthMsg + 6, 8 + userName.length())) {
                         // Parse public key
                         pubKey = *((uint64_t*)(reqAuthMsg + 14 + userName.length() + 1));
@@ -842,7 +867,7 @@ void checkTCPConnections() {
                 case ESTABLISH_COMM: {
                     int j = 0, recvLen;
                     char newClientNameArr[32];
-                    
+
                     // Read until the first null byte
                     do {
                         recvLen = read(it->fd, newClientNameArr + j, 1);
@@ -1060,7 +1085,7 @@ void checkTCPConnections() {
                     // dprint("recvLen is %d\n", recvLen);
 
                     dataBuffer += dataMsg;
-                    
+
                     dprint("User %s message.\n", tcpConnMap.find(it->fd)->second.c_str());
 					clearline();
                     printf("%s>%s\n", tcpConnMap.find(it->fd)->second.c_str(), dataBuffer.c_str());
@@ -1118,12 +1143,12 @@ void checkSTDIN() {
             }
             else if(buffer[0] != '\n')
                 message += buffer[0];
-			
+
             if(buffer[0] == '\n') { //send message
                 //echos current message onto terminal
 				clearline();
                 printf("%s>%s\n",userName.c_str(), message.c_str());
-                
+
                 std::string firstWord = message.substr(0, message.find_first_of(" ",0));
                 if(commandMap.find(firstWord) != commandMap.end()) {
                     switch(commandMap[firstWord]) {
@@ -1174,7 +1199,7 @@ void checkSTDIN() {
 
                             break;
 						}
-						case SWITCH: {							
+						case SWITCH: {
 							std::string target;
 							if(-1 == getTarget(target))
 							{
@@ -1185,13 +1210,13 @@ void checkSTDIN() {
 								currentConnection = clientMap.find(target)->second.tcpSockFd;
 							else
                                 tprint("Requires a valid connection.\n");
-                            
+
                             break;
 						}
-						case DISCONNECT: {						
+						case DISCONNECT: {
 							if(currentConnection != -1){
 								tprint("Closing connection with %s\n", tcpConnMap.find(currentConnection)->second.c_str());
-								
+
 								uint8_t outgoingTCPMsg[6];
 								memcpy(outgoingTCPMsg, "P2PI", 4);
 								*((uint16_t*)(outgoingTCPMsg + 4)) = htons(DISCONTINUE_COMM);
@@ -1200,11 +1225,11 @@ void checkSTDIN() {
 									die("Failed to send TCP message.");
 									//TODO:
 									break;
-								}								
+								}
 								if(tcpConnMap.find(currentConnection) != tcpConnMap.end()) {
 									std::string connName = tcpConnMap.find(currentConnection)->second;
 									close(clientMap.find(connName)->second.tcpSockFd);
-									
+
 									for(auto it = pollFd.begin(); it != pollFd.end(); it++) {
 										if(it->fd == currentConnection){
 											pollFd.erase(it);
@@ -1220,7 +1245,7 @@ void checkSTDIN() {
 							}
 							else
                                 tprint("Connection must be the current active connection.\n");
-						
+
                             break;
 						}
 						case LIST: {
@@ -1241,7 +1266,7 @@ void checkSTDIN() {
                             tprint("\\unblock username\n\t-when you want to become friend with someone again\n");
                             break;
                         }
-						
+
 
                         case AWAY: {
 							int onFail = 0;
@@ -1286,7 +1311,7 @@ void checkSTDIN() {
                                 if(client->second.tcpSockFd != -1 && write(client->second.tcpSockFd, outgoingTCPMsg, 6) < 0){
                                     die("Failed to send TCP message");
 								}
-                                
+
                                 client->second.block = 1;
 
                                 close(client->second.tcpSockFd);
@@ -1305,7 +1330,7 @@ void checkSTDIN() {
                             // User not found
                             else
                                 tprint("User %s not found.\n", target.c_str());
-                            
+
                             break;
                         }
                         case UNBLOCK: {
@@ -1317,11 +1342,11 @@ void checkSTDIN() {
 							}
                             // Find user
                             if(clientMap.find(target) != clientMap.end())
-                               clientMap.find(target)->second.block = 0; 
+                               clientMap.find(target)->second.block = 0;
                             // User not found
                             else
                                 tprint("User %s not found.\n", target.c_str());
-                            
+
                             break;
                         }
                         case EXIT: {
@@ -1409,7 +1434,7 @@ void prompt()
 	fflush(STDIN_FILENO);
 	std::string passwordmask = "";
 	while(1){
-	
+
 	poll(pollFd.data(), 1, 5000);
 	if(pollFd[terminalFDPOLL].revents & POLLIN) {
         ioctl(STDOUT_FILENO,TIOCGWINSZ,&size);
@@ -1447,7 +1472,7 @@ void prompt()
 				tprint("Logging in...\n");
 				break;
 			}
-			
+
 		}
         clearline();
 		std::string connName;
@@ -1457,7 +1482,7 @@ void prompt()
 			connName = tcpConnMap.find(currentConnection)->second;
 
 		printf("Enter password for %s>%s",userName.c_str(), passwordmask.c_str());
-		
+
         //printf("\033[0C");
         fflush(STDIN_FILENO);
         buffer.clear();
