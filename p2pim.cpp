@@ -1,6 +1,6 @@
 #include "p2pim.h"
 #include "EncryptionLibrary.h"
-// #define DEBUG 1
+//#define DEBUG 1
 
 
 #define tprint(string, ...) {clearline(); printf(string, ##__VA_ARGS__);}
@@ -41,7 +41,7 @@ static std::unordered_map<std::string, int> commandMap {
 
 std::string userName = getenv("USER");
 std::string hostName;
-std::string password;
+uint64_t public_key, private_key, public_key_modulus;
 int udpPort = 50550;
 int tcpPort = 50551;
 int taUDPPort = 50552;
@@ -107,7 +107,7 @@ int main(int argc, char** argv) {
 
     SetNonCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
 
-	prompt();
+	//login_prompt();
 	
     //tprint("Please type in \"\\help\" for a list of commands available\n");
 	
@@ -134,8 +134,9 @@ int main(int argc, char** argv) {
                 sendUDPMessage(DISCOVERY);
                 currTimeout = baseTimeout;
 
+					tprint("sending auth discovery\n");
                 // Send request authenicated key message
-                {
+                
                     int reqAuthMsgLen = 14 + userName.length() + 1;
 
                     memset(reqAuthMsg, 0, 46);
@@ -147,17 +148,24 @@ int main(int argc, char** argv) {
 
                     while(secretNum == 0)
                         secretNum = GenerateRandomValue();
-
-                    uint64_t secretData = secretNum;
-
+					
+                    uint64_t secretData= secretNum;
                     // TODO: secretNum is a 32bit value, but the 1st parameter of PublicEncryptDecrypt
                     // should be a 64bit value, double check if not work
                     PublicEncryptDecrypt(secretData, P2PI_TRUST_E, P2PI_TRUST_N);
-                    *((uint64_t*)(reqAuthMsg + 6)) =  htons(secretData);
+					tprint("encrypted Secret: %lu\n",secretData);
+					
+                    *((uint64_t*)(reqAuthMsg + 6)) =  htonl(secretData>>32);
+                    *((uint64_t*)(reqAuthMsg + 10)) =  htonl(secretData);
                     memcpy(reqAuthMsg + 14, userName.c_str(), userName.length());
-
+					tprint("out packet: \n");
+							for(int i =0; i < 18; i++)
+							{
+								tprint("%d %c\n", reqAuthMsg[i],reqAuthMsg[i]);
+							}
+					
+					
                     // Do actually sending
-
                     // if there is a trust anchor specified
                     if(!taVector.empty()) {
                         struct sockaddr_in taAddr = *taVector.begin();
@@ -167,6 +175,7 @@ int main(int argc, char** argv) {
                     }
                     // else, broadcast
                     else {
+						dprint("sending auth discovery\n");
                         // change dest port to trust anchor udp port
                         udpServerAddr.sin_port = htons(taUDPPort);
                         udpServerAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
@@ -179,7 +188,7 @@ int main(int argc, char** argv) {
                         udpServerAddr.sin_port = htons(udpPort);
                     }
 
-                }
+                
 
 
             }
@@ -714,12 +723,15 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
     uint8_t incomingUDPMsg[MAX_UDP_MSG_LEN];
     udpClientAddrLen = sizeof(udpClientAddr);
     int recvLen;
-
     // UDP packet
     if(pollFd[udpFDPOLL].revents == POLLIN) {
         recvLen = recvfrom(udpSockFd, incomingUDPMsg, MAX_UDP_MSG_LEN, 0,
             (struct sockaddr*)&udpClientAddr, &udpClientAddrLen);
-
+		tprint("inc packet: \n");
+		for(int i =0; i < recvLen; i++)
+		{
+			tprint("%d %c\n", incomingUDPMsg[i],incomingUDPMsg[i]);
+		}
         if(recvLen > 4 && memcmp("P2PI", incomingUDPMsg, 4) == 0) {
             int type = getType(incomingUDPMsg);
             std::string userName_a, hostName_a;
@@ -785,14 +797,14 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     dprint("hi\n");
                     if(!memcmp(incomingUDPMsg + 6, reqAuthMsg + 6, 8 + userName.length())) {
                         // Parse public key
-                        pubKey = *((uint64_t*)(reqAuthMsg + 14 + userName.length() + 1));
+                        pubKey = ntohl(*((uint64_t*)(reqAuthMsg + 14 + userName.length() + 1)));
                         // Modulus
-                        modulus = *((uint64_t*)(reqAuthMsg + 14 + userName.length() + 9));
+                        modulus = ntohl(*((uint64_t*)(reqAuthMsg + 14 + userName.length() + 9)));
                         // Checksum
-                        uint64_t checkSum = *((uint64_t*)(reqAuthMsg + 14 + userName.length() + 17));
+                        uint64_t checkSum = ntohl(*((uint64_t*)(reqAuthMsg + 14 + userName.length() + 17)));
 
                         if(checkSum == AuthenticationChecksum(secretNum, (const char*)reqAuthMsg, P2PI_TRUST_E, P2PI_TRUST_N)) {
-                            dprint("GOOD\n");
+                            tprint("PUB KEY: %lu M: %lu", pubKey, modulus); 
                         }
                     }
                     break;
@@ -1403,8 +1415,9 @@ void clearline() {
     printf("\33[2K\r");
 }
 
-void prompt()
+void login_prompt()
 {
+	std::string password;
 	tprint("Enter password for %s>", userName.c_str());
 	fflush(STDIN_FILENO);
 	std::string passwordmask = "";
@@ -1445,6 +1458,9 @@ void prompt()
 			{
 				dprint("Exposing your password: %s\n", password.c_str());
 				tprint("Logging in...\n");
+				std::string str = userName.c_str();
+				StringToPublicNED(str.c_str(), public_key_modulus, public_key, private_key);
+				tprint("public key modulus: %lu public key: %lu private key: %lu\n", public_key_modulus, public_key, private_key);
 				break;
 			}
 			
