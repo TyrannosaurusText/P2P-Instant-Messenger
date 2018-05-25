@@ -1,14 +1,14 @@
 #include "p2pim.h"
+#include "EncryptionLibrary.h"
 // #define DEBUG 1
 
 
-#define terminalprint(string, ...) {clearline(); printf(string, __VA_ARGS__);}
-#define tprint(string) {clearline(); printf(string);}
+#define tprint(string, ...) {clearline(); printf(string, ##__VA_ARGS__);}
 #define MAX_UDP_MSG_LEN (10 + 254 + 32 + 2)
 
 
 
-enum Option {USERNAME, UDP_PORT, TCP_PORT, MIN_TIMEOUT, MAX_TIMEOUT, HOST};
+enum Option {USERNAME, UDP_PORT, TCP_PORT, MIN_TIMEOUT, MAX_TIMEOUT, HOST, TA_UDP_PORT, AUTH_HOST};
 enum Command {CONNECT, LIST, DISCONNECT, GETLIST, HELP, SWITCH, AWAY, UNAWAY, BLOCK, UNBLOCK, EXIT};
 
 struct Client {
@@ -28,7 +28,7 @@ struct Pair {
 
 static std::unordered_map<std::string, int> optionMap {
     {"-u", USERNAME}, {"-up", UDP_PORT}, {"-tp", TCP_PORT},
-    {"-dt", MIN_TIMEOUT}, {"-dm", MAX_TIMEOUT}, {"-pp", HOST}
+    {"-dt", MIN_TIMEOUT}, {"-dm", MAX_TIMEOUT}, {"-pp", HOST}, {"ap", TA_UDP_PORT}, {"ah", AUTH_HOST}
 };
 
 static std::unordered_map<std::string, int> commandMap {
@@ -38,10 +38,12 @@ static std::unordered_map<std::string, int> commandMap {
     {"\\block", BLOCK}, {"\\unblock", UNBLOCK}, {"\\exit", EXIT}
 };
 
+
 std::string userName = getenv("USER");
 std::string hostName;
 int udpPort = 50550;
 int tcpPort = 50551;
+int taUDPPort = 50552;
 int gMinTimeout = 5000;
 int gMaxTimeout = 60000;
 struct in_addr gIPAddr, gSubnetMask;
@@ -72,6 +74,11 @@ struct termios SavedTermAttributes;
 std::string list = "";
 
 
+std::vector<struct sockaddr_in> taVector;
+uint8_t reqAuthMsg[46];
+uint32_t secretNum;
+uint64_t pubKey;
+uint64_t modulus;
 
 std::unordered_map<std::string, struct Client>::iterator findClientByFd(int fd);
 
@@ -122,6 +129,55 @@ int main(int argc, char** argv) {
 
                 sendUDPMessage(DISCOVERY);
                 currTimeout = baseTimeout;
+
+                // Send request authenicated key message
+                {
+                    int reqAuthMsgLen = 14 + userName.length() + 1;
+
+                    memset(reqAuthMsg, 0, 46);
+                    memcpy(reqAuthMsg, "P2PI", 4);
+                    *((uint16_t*)(reqAuthMsg + 4)) = htons(REQUEST_AUTH_KEY);
+
+                    // Generating random
+                    secretNum = GenerateRandomValue();
+
+                    while(secretNum == 0)
+                        secretNum = GenerateRandomValue();
+
+                    uint64_t secretData = secretNum;
+
+                    // TODO: secretNum is a 32bit value, but the 1st parameter of PublicEncryptDecrypt
+                    // should be a 64bit value, double check if not work
+                    PublicEncryptDecrypt(secretData, P2PI_TRUST_E, P2PI_TRUST_N);
+                    *((uint64_t*)(reqAuthMsg + 6)) =  htons(secretData);
+                    memcpy(reqAuthMsg + 14, userName.c_str(), userName.length());
+
+                    // Do actually sending
+
+                    // if there is a trust anchor specified
+                    if(!taVector.empty()) {
+                        struct sockaddr_in taAddr = *taVector.begin();
+                        if(sendto(udpSockFd, reqAuthMsg, reqAuthMsgLen, 0, (struct sockaddr*)&taAddr, sizeof(*taVector.begin()))) {
+                            die("Failed to unicast trust anchor discovery");
+                        }
+                    }
+                    // else, broadcast
+                    else {
+                        // change dest port to trust anchor udp port
+                        udpServerAddr.sin_port = htons(taUDPPort);
+                        udpServerAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+
+                        if(sendto(udpSockFd, reqAuthMsg, reqAuthMsgLen, 0, (struct sockaddr*)&udpServerAddr, sizeof(udpServerAddr)) < 0) {
+                            die("Failed to broadcast trust anchor discovery");
+                        }
+
+                        // reset dest port
+                        udpServerAddr.sin_port = htons(udpPort);
+                    }
+
+                }
+
+
             }
             else
                 currTimeout = -1;
@@ -156,7 +212,7 @@ int main(int argc, char** argv) {
             clearline();
             dprint("Next iteration at %d\n", currTimeout);
             if(clientMap.empty()) {
-                dprint("TIMEOUT: \n", 0);
+                dprint("TIMEOUT: \n");
                 // Double current timeout
                 baseTimeout *= 2;
                 dprint("%d\n", currTimeout);
@@ -349,6 +405,8 @@ void parseOptions(int argc, char** argv) {
     // Get default hostname, IP, and subnet mask
     getClientName();
 
+    int isAHPort = 0;
+
     // Iterate through all options
     for(int i = 1; i < argc; i++){
         optErr = argv[i];
@@ -451,6 +509,32 @@ void parseOptions(int argc, char** argv) {
                         }
                         break;
                     }
+                    case TA_UDP_PORT: {
+                        optionMap[argv[i]] = -1;
+                        checkIsNum(argv[i + 1]);
+                        checkPortRange(atoi(argv[i + 1]));
+                        
+                        if(!isAHPort)
+                            taUDPPort = atoi(argv[i + 1]);
+
+                        break;
+                    }
+                    case AUTH_HOST: {
+                        // std::string tmpArgv = argv[i + 1];
+                        // // Parse hostname part and port num part
+                        // std::size_t pos = tmpArgv.find(":");
+                        // // If not hostname is provided
+                        // if(pos == 0 || pos == tmpArgv.length() - 1) {
+                        //     fprintf(stderr, "Invalid argument %s\n", argv[i + 1]);
+                        //     ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
+                        //     exit(1);
+                        // }
+                        // else {
+
+                        //     if(pos < 0)
+                        // }
+                        break;
+                    }
                     default: {
                         fprintf(stderr, "PARSE ERROR\n");
                         ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
@@ -512,7 +596,7 @@ void connectToClient(std::string clientName) {
         if(0 > connect(newConn, (struct sockaddr *)&client2ConnetAddr, sizeof(client2ConnetAddr)))
             die("Failed to connect to host.");
 
-        dprint("CONNECTED TO NEW HOST\n", 0);
+        dprint("CONNECTED TO NEW HOST\n");
 
         // Send ESTABLISH COMMUNICATION MSG
         uint8_t ECM[39];
@@ -585,7 +669,7 @@ void setupSocket() {
         if(getsockname(tcpSockFd, (struct sockaddr *)&tcpServerAddr, &len) == -1)
             die("Failed to get sock name.");
 
-        terminalprint("New socket %d\n", tcpServerAddr.sin_port);
+        tprint("New socket %d\n", tcpServerAddr.sin_port);
         tcpPort = ntohs(tcpServerAddr.sin_port);
     }
 
@@ -605,7 +689,7 @@ void sendTCPMessage(int type, int fd) {
 
 void checkTCPPort(std::string newClientName) {
     if(pollFd[tcpFDPOLL].revents == POLLIN) {
-        dprint("NEW HOST TRYING TO CONNECT\n", 0);
+        dprint("NEW HOST TRYING TO CONNECT\n");
 
         struct sockaddr_in tcpClientAddr;
         socklen_t tcpClientAddrLen = sizeof(tcpClientAddr);
@@ -650,21 +734,21 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     if(memcmp(incomingUDPMsg + 6, outgoingUDPMsg + 6, outgoingUDPMsgLen - 6)) {
                         // Check if host is already discovered
                         if(clientMap.find(userName_a) == clientMap.end()) {
-                            terminalprint("\r-----NEW HOST: %s-----\n", userName_a.c_str());
+                            tprint("\r-----NEW HOST: %s-----\n", userName_a.c_str());
                             addNewClient(incomingUDPMsg);
                         }
                         // Should send reply regardless the host is already known
                         sendUDPMessage(REPLY);
                     }
                     else
-                        dprint("-----SELF DISCOVERY-----\n", 0);
+                        dprint("-----SELF DISCOVERY-----\n");
 
                     break;
                 }
                 case REPLY: {
                     // Add host to map if not in map already
                     if(clientMap.find(userName_a) == clientMap.end()) {
-                        terminalprint("\r-----NEW HOST: %s-----\n", userName_a.c_str());
+                        tprint("\r-----NEW HOST: %s-----\n", userName_a.c_str());
                         addNewClient(incomingUDPMsg);
                         // Try to initiate tcp connection with host
                         dprint("%s\n", clientMap.begin()->first.c_str());
@@ -677,7 +761,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     std::unordered_map<std::string, struct Client>::iterator it = clientMap.find(userName_a);
 
                     if(it != clientMap.end()) {
-                        terminalprint("\rClient %s is closing\n", it->first.c_str());
+                        tprint("\rClient %s is closing\n", it->first.c_str());
                         if(it->second.tcpSockFd == currentConnection)
                             currentConnection = -1;
 
@@ -685,11 +769,27 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     }
                     // If no more host is available, go back to discovery
                     if(clientMap.empty()) {
-                        dprint("CLOSING...\n", 0);
+                        dprint("CLOSING...\n");
                         currTimeout = 0;
                         // Resets timeout value
                         baseTimeout = gMinTimeout;
                         dprint("basetimeout is %d\n", baseTimeout);
+                    }
+                    break;
+                }
+                case REPLY_AUTH_KEY: {
+                    dprint("hi\n");
+                    if(!memcmp(incomingUDPMsg + 6, reqAuthMsg + 6, 8 + userName.length())) {
+                        // Parse public key
+                        pubKey = *((uint64_t*)(reqAuthMsg + 14 + userName.length() + 1));
+                        // Modulus
+                        modulus = *((uint64_t*)(reqAuthMsg + 14 + userName.length() + 9));
+                        // Checksum
+                        uint64_t checkSum = *((uint64_t*)(reqAuthMsg + 14 + userName.length() + 17));
+
+                        if(checkSum == AuthenticationChecksum(secretNum, (const char*)reqAuthMsg, P2PI_TRUST_E, P2PI_TRUST_N)) {
+                            dprint("GOOD\n");
+                        }
                     }
                     break;
                 }
@@ -784,7 +884,7 @@ void checkTCPConnections() {
                         if(write(it->fd, ECM, 6) < 0) {
                             die("Failed to establish TCP connection.");
                         }
-                        terminalprint("Accepting connection from: %s\n", newClientName.c_str());
+                        tprint("Accepting connection from: %s\n", newClientName.c_str());
 
                     }
 
@@ -792,12 +892,12 @@ void checkTCPConnections() {
                     // }
                 }
                 case ACCEPT_COMM: {
-                    terminalprint("Connected to user %s\n", tcpConnMap.find(it->fd)->second.c_str());
+                    tprint("Connected to user %s\n", tcpConnMap.find(it->fd)->second.c_str());
                     break;
                 }
                 case USER_UNAVALIBLE: {
                     // Close connection as well
-                    terminalprint("The user %s is currently unavailable\n", tcpConnMap.find(it->fd)->second.c_str());
+                    tprint("The user %s is currently unavailable\n", tcpConnMap.find(it->fd)->second.c_str());
                     if(findClientByFd(it->fd) != clientMap.end())
                         findClientByFd(it->fd)->second.tcpSockFd = -1;
                     if(tcpConnMap.find(it->fd) != tcpConnMap.end()) {
@@ -811,7 +911,7 @@ void checkTCPConnections() {
                 }
                 case REQUEST_USER_LIST: {
                     tprint("User list requested\n");
-                    dprint("hi\n",0);
+                    dprint("hi\n");
                     uint8_t ECM[10];
                     memcpy(ECM, "P2PI", 4);
                     *((uint16_t*)ECM + 2) = htons(REPLY_USER_LIST);
@@ -903,13 +1003,13 @@ void checkTCPConnections() {
 
                         newClient.userName = (char*)(entryArr + 6 + newClient.hostName.length() + 2 + 1);
 
-                        // terminalprint("username %s, hostname %s, tcp %d, udp %d\n", newClient.userName.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
+                        // tprint("username %s, hostname %s, tcp %d, udp %d\n", newClient.userName.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
 
                         if(newClient.userName != userName && clientMap.find(newClient.userName) == clientMap.end())
                             clientMap[newClient.userName] = newClient;
                     }
                     generateList();
-                    terminalprint("\n%s\n", list.c_str());
+                    tprint("\n%s\n", list.c_str());
                     break;
                 }
                 case DATA: {
@@ -963,7 +1063,7 @@ void checkTCPConnections() {
                     break;
                 }
                 case DISCONTINUE_COMM: {
-                    terminalprint("User %s wants to disconnect.\n", tcpConnMap.find(it->fd)->second.c_str());
+                    tprint("User %s wants to disconnect.\n", tcpConnMap.find(it->fd)->second.c_str());
                     dprint("map size %d\n", clientMap.size());
                     for(auto a : clientMap) {
                         dprint("User listing: %s\n", a.second.userName.c_str());
@@ -981,7 +1081,7 @@ void checkTCPConnections() {
                     continue;
                 }
                 default: {
-                    fprintf(stderr, "\nINVALID MESSAGE\n", 0);
+                    fprintf(stderr, "\nINVALID MESSAGE\n");
                     break;
                 }
             }
@@ -1002,7 +1102,7 @@ void checkSTDIN() {
         //dprint("buffer len: %d\n", buffer.length());
         //dprint("buffer: %c\n", buffer[0]);
         if(bytesRead == 1) {
-            //terminalprint("%c",buffer[0]);
+            //tprint("%c",buffer[0]);
             fflush(STDIN_FILENO);
 
             if(buffer[0] == 0x7F) { //delete char
@@ -1030,7 +1130,7 @@ void checkSTDIN() {
 								tprint("No users specified.\n");
 								break;
 							}
-                            terminalprint("Looking for user: %s\n", target.c_str());
+                            tprint("Looking for user: %s\n", target.c_str());
 							auto client = clientMap.find(target);
                             if( client != clientMap.end() ) {
 								if(client->second.block) {
@@ -1042,12 +1142,12 @@ void checkSTDIN() {
                                     currentConnection = client->second.tcpSockFd;
 								}
 								else{
-									terminalprint("Connected to user: %s\n", target.c_str());
+									tprint("Connected to user: %s\n", target.c_str());
 									currentConnection = client->second.tcpSockFd;
 								}
                             }
                             else
-                                terminalprint("No user '%s' found.\n", target.c_str());
+                                tprint("No user '%s' found.\n", target.c_str());
 
                             break;
                         }
@@ -1080,13 +1180,13 @@ void checkSTDIN() {
 							if(clientMap.find(target) != clientMap.end() && clientMap.find(target)->second.tcpSockFd != -1)
 								currentConnection = clientMap.find(target)->second.tcpSockFd;
 							else
-                                terminalprint("Requires a valid connection.\n", target.c_str());
+                                tprint("Requires a valid connection.\n");
                             
                             break;
 						}
 						case DISCONNECT: {						
 							if(currentConnection != -1){
-								terminalprint("Closing connection with %s\n", tcpConnMap.find(currentConnection)->second.c_str());
+								tprint("Closing connection with %s\n", tcpConnMap.find(currentConnection)->second.c_str());
 								
 								uint8_t outgoingTCPMsg[6];
 								memcpy(outgoingTCPMsg, "P2PI", 4);
@@ -1121,7 +1221,7 @@ void checkSTDIN() {
 						}
 						case LIST: {
                             generateList();
-                            terminalprint("%s", list.c_str());
+                            tprint("%s", list.c_str());
                             break;
                         }
                         case HELP: {
@@ -1200,7 +1300,7 @@ void checkSTDIN() {
                             }
                             // User not found
                             else
-                                terminalprint("User %s not found.\n", target.c_str());
+                                tprint("User %s not found.\n", target.c_str());
                             
                             break;
                         }
@@ -1216,7 +1316,7 @@ void checkSTDIN() {
                                clientMap.find(target)->second.block = 0; 
                             // User not found
                             else
-                                terminalprint("User %s not found.\n", target.c_str());
+                                tprint("User %s not found.\n", target.c_str());
                             
                             break;
                         }

@@ -26,7 +26,7 @@
 #include <sys/ioctl.h>
 
 #ifdef DEBUG
-    #define dprint(string, ...) printf(string,__VA_ARGS__)
+    #define dprint(string, ...) printf(string, ##__VA_ARGS__)
 #else
     #define dprint(string, ...)
 #endif
@@ -42,6 +42,8 @@
 #define REPLY_USER_LIST 8
 #define DATA 9
 #define DISCONTINUE_COMM 10
+#define REQUEST_AUTH_KEY 16
+#define REPLY_AUTH_KEY 17
 
 #define terminalFDPOLL 0
 #define udpFDPOLL 1
