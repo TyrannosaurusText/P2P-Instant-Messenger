@@ -57,7 +57,7 @@ int getType(uint8_t* message);
 void getHostNUserName(uint8_t* message, std::string& hostName, std::string& userName);
 void getPorts(uint8_t* message, int& udpPort, int& tcpPort);
 
-void prompt();
+void login_prompt();
 void getHostName();
 void checkIsNum(const char* str);
 void checkPortRange(int portNum);
