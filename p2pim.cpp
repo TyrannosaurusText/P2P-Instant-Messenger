@@ -43,7 +43,6 @@ static std::unordered_map<std::string, int> commandMap {
 
 
 std::string username = getenv("USER");
-std::string password;
 std::string hostName;
 uint64_t public_key, private_key, public_key_modulus;
 int udpPort = 50550;
@@ -814,8 +813,10 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     break;
                 }
                 case REPLY_AUTH_KEY: {
-                    tprint("hi\n");
-                    tprint("inc auth:\n")
+                    // tprint("hi\n");
+                    // tprint("inc auth:\n")
+
+                    tprint("Found authority host %s\n", gethostbyaddr((void*)(&udpClientAddr.sin_addr), udpClientAddrLen, AF_INET)->h_name);
 
                     uint64_t secretMsg1 = (ntohl(*(uint32_t*)(incomingUDPMsg + 6)));
                     uint64_t secretMsg2 = (ntohl(*(uint32_t*)(incomingUDPMsg + 10)));
@@ -823,21 +824,26 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     uint64_t public_key1 = (ntohl(*(uint32_t*)(incomingUDPMsg + 14 + username.length() + 1)));
                     uint64_t public_key2 = (ntohl(*(uint32_t*)(incomingUDPMsg + 14 + username.length() + 5)));
                     uint64_t new_public_key = ((public_key1 << 32) + public_key2);
-                    tprint("key: %lu\n", new_public_key);
+                    // tprint("key: %lu\n", new_public_key);
                     uint64_t modulus1 = (ntohl(*(uint32_t*)(incomingUDPMsg + 14 + username.length() + 9)));
                     uint64_t modulus2 = (ntohl(*(uint32_t*)(incomingUDPMsg + 14 + username.length() + 13)));
                     uint64_t modulus = ((modulus1 << 32) + modulus2);
-                    tprint("mod: %lu\n", modulus);
+                    // tprint("mod: %lu\n", modulus);
                     PublicEncryptDecrypt(secretNum, P2PI_TRUST_E, P2PI_TRUST_N);
-                    tprint("val: %lu\n", secretNum);
+                    // tprint("val: %lu\n", secretNum);
                     
 
                     uint64_t checksum1 = (ntohl(*(uint32_t*)(incomingUDPMsg + 14 + username.length() + 17)));
                     uint64_t checksum2 = (ntohl(*(uint32_t*)(incomingUDPMsg + 14 + username.length() + 21)));
                     uint64_t checksum = ((checksum1 << 32) + checksum2);
                     PublicEncryptDecrypt(checksum, P2PI_TRUST_E, P2PI_TRUST_N);
-                    tprint("checksum: %u\n", (uint32_t)(checksum));
-                    tprint("but it should be %u\n", AuthenticationChecksum(secretNum, username.c_str(), new_public_key, modulus));
+                    if((uint32_t)(checksum) != AuthenticationChecksum(secretNum, username.c_str(), new_public_key, modulus)) {
+                        tprint("Checksum does not match\n");
+                    }
+                    else if(new_public_key == public_key) {
+                        tprint("Password provided has been authenticated.\n");
+                    }
+                   
                     break;
                 }
             }
@@ -1506,7 +1512,7 @@ int proccessEncryptedDataChunk(struct Client clientInfo, uint8_t* encryptedDataC
 
 void login_prompt()
 {
-    // std::string password;
+    std::string password;
     tprint("Enter password for %s>", username.c_str());
     fflush(STDIN_FILENO);
     std::string passwordmask = "";
@@ -1547,7 +1553,7 @@ void login_prompt()
             {
                 dprint("Exposing your password: %s\n", password.c_str());
                 tprint("Logging in...\n");
-                std::string str = (username + ":" + password).c_str();
+                std::string str = username + ":" + password;
                 StringToPublicNED(str.c_str(), public_key_modulus, public_key, private_key);
                 tprint("public key modulus: %lu public key: %lu private key: %lu\n", public_key_modulus, public_key, private_key);
                 break;
