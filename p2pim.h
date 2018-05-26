@@ -26,9 +26,9 @@
 #include <sys/ioctl.h>
 
 #ifdef DEBUG
-    #define dprint(string, ...) printf(string, ##__VA_ARGS__)
+    #define dprint(string, ...) {clearline(); printf(string, ##__VA_ARGS__);}
 #else
-    #define dprint(string, ...)
+    #define dprint(string, ...) 
 #endif
 
 

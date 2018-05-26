@@ -1,6 +1,6 @@
 #include "p2pim.h"
 #include "EncryptionLibrary.h"
-//#define DEBUG 1
+#define DEBUG 1
 
 
 #define tprint(string, ...) {clearline(); printf(string, ##__VA_ARGS__);}
@@ -152,17 +152,14 @@ int main(int argc, char** argv) {
                     uint64_t secretData= secretNum;
                     // TODO: secretNum is a 32bit value, but the 1st parameter of PublicEncryptDecrypt
                     // should be a 64bit value, double check if not work
+					tprint("Secret: %lu\n",secretData);
                     PublicEncryptDecrypt(secretData, P2PI_TRUST_E, P2PI_TRUST_N);
 					tprint("encrypted Secret: %lu\n",secretData);
 					
                     *((uint64_t*)(reqAuthMsg + 6)) =  htonl(secretData>>32);
                     *((uint64_t*)(reqAuthMsg + 10)) =  htonl(secretData);
                     memcpy(reqAuthMsg + 14, userName.c_str(), userName.length());
-					tprint("out packet: \n");
-							for(int i =0; i < 18; i++)
-							{
-								tprint("%d %c\n", reqAuthMsg[i],reqAuthMsg[i]);
-							}
+					
 					
 					
                     // Do actually sending
@@ -750,11 +747,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
     if(pollFd[udpFDPOLL].revents == POLLIN) {
         recvLen = recvfrom(udpSockFd, incomingUDPMsg, MAX_UDP_MSG_LEN, 0,
             (struct sockaddr*)&udpClientAddr, &udpClientAddrLen);
-		tprint("inc packet: \n");
-		for(int i =0; i < recvLen; i++)
-		{
-			tprint("%d %c\n", incomingUDPMsg[i],incomingUDPMsg[i]);
-		}
+
         if(recvLen > 4 && memcmp("P2PI", incomingUDPMsg, 4) == 0) {
             int type = getType(incomingUDPMsg);
             std::string userName_a, hostName_a;
@@ -818,7 +811,17 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                 }
                 case REPLY_AUTH_KEY: {
                     tprint("hi\n");
-                    if(!memcmp(incomingUDPMsg + 6, reqAuthMsg + 6, 8 + userName.length())) {
+					tprint("inc auth:\n")
+
+					uint64_t secretmsg1 = (ntohl(*(uint32_t*)(incomingUDPMsg+6)));
+					uint64_t secretmsg2 = (ntohl(*(uint32_t*)(incomingUDPMsg+10)));
+					uint64_t decrypt = ((secretmsg1<<32)+secretmsg2);
+                    tprint("key: %lu\n", private_key);
+					tprint("mod: %lu\n", public_key_modulus);
+					PublicEncryptDecrypt(decrypt, P2PI_TRUST_E, P2PI_TRUST_N);
+                    tprint("val: %lu\n", decrypt);
+					
+					if(!memcmp(incomingUDPMsg + 6, reqAuthMsg + 6, 8 + userName.length())) {
                         // Parse public key
                         pubKey = ntohl(*((uint64_t*)(reqAuthMsg + 14 + userName.length() + 1)));
                         // Modulus
