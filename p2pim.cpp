@@ -10,6 +10,7 @@
 
 enum Option {USERNAME, UDP_PORT, TCP_PORT, MIN_TIMEOUT, MAX_TIMEOUT, HOST, TA_UDP_PORT, AUTH_HOST};
 enum Command {CONNECT, LIST, DISCONNECT, GETLIST, HELP, SWITCH, AWAY, UNAWAY, BLOCK, UNBLOCK, EXIT};
+enum AuthStatus {NONE, BAD, GOOD};
 
 struct Client {
     std::string username;
@@ -19,9 +20,10 @@ struct Client {
     int tcpSockFd = -1;
     int block = 0;
     // std::string leftOverMsg = "";
+    int auth = NONE;
     int connectionType = 0; //1 for encrypted session
-    uint64_t sessionID=0;
-    uint64_t seqNum=0;
+    uint64_t sessionID = 0;
+    uint64_t seqNum = 0;
 };
 
 struct Pair {
@@ -77,7 +79,7 @@ fd_set set;
 struct termios SavedTermAttributes;
 std::string list = "";
 
-
+int auth = NONE;
 std::vector<struct sockaddr_in> taVector;
 uint8_t reqAuthMsg[46];
 
@@ -135,8 +137,10 @@ int main(int argc, char** argv) {
                 sendUDPMessage(DISCOVERY);
                 currTimeout = baseTimeout;
 
+                if(auth == NONE) {
+
                     tprint("sending auth discovery\n");
-                // Send request authenicated key message
+                    // Send request authenicated key message
                 
                     int reqAuthMsgLen = 14 + username.length() + 1;
 
@@ -189,7 +193,7 @@ int main(int argc, char** argv) {
                     }
 
                 
-
+                }
 
             }
             else
@@ -827,8 +831,8 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     // tprint("key: %lu\n", new_public_key);
                     uint64_t modulus1 = (ntohl(*(uint32_t*)(incomingUDPMsg + 14 + username.length() + 9)));
                     uint64_t modulus2 = (ntohl(*(uint32_t*)(incomingUDPMsg + 14 + username.length() + 13)));
-                    uint64_t modulus = ((modulus1 << 32) + modulus2);
-                    // tprint("mod: %lu\n", modulus);
+                    uint64_t new_modulus = ((modulus1 << 32) + modulus2);
+                    // tprint("mod: %lu\n", new_modulus);
                     PublicEncryptDecrypt(secretNum, P2PI_TRUST_E, P2PI_TRUST_N);
                     // tprint("val: %lu\n", secretNum);
                     
@@ -837,11 +841,16 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     uint64_t checksum2 = (ntohl(*(uint32_t*)(incomingUDPMsg + 14 + username.length() + 21)));
                     uint64_t checksum = ((checksum1 << 32) + checksum2);
                     PublicEncryptDecrypt(checksum, P2PI_TRUST_E, P2PI_TRUST_N);
-                    if((uint32_t)(checksum) != AuthenticationChecksum(secretNum, username.c_str(), new_public_key, modulus)) {
+                    if((uint32_t)(checksum) != AuthenticationChecksum(secretNum, username.c_str(), new_public_key, new_modulus)) {
                         tprint("Checksum does not match\n");
                     }
-                    else if(new_public_key == public_key) {
+                    else if(new_modulus == 0 && new_public_key == 0) {
+                        tprint("User %s unknown by authority\n", username.c_str());
+                        auth = BAD;
+                    }
+                    else if(new_public_key == public_key && new_modulus == public_key_modulus) {
                         tprint("Password provided has been authenticated.\n");
+                        auth = GOOD;
                     }
                    
                     break;
