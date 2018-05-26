@@ -44,6 +44,18 @@
 #define DISCONTINUE_COMM 10
 #define REQUEST_AUTH_KEY 0x10
 #define REPLY_AUTH_KEY 0x11
+#define ESTABLISH_ENCRYPTED_COMM 0x000B
+#define ACCEPT_ENCRYPTED_COMM 0x000C
+#define ENCRYPTED_DATA_CHUNK_MESSAGE 0x000D
+#define ESTABLISH_COMM_E 0x5555
+#define ACCEPT_COMM_E 0xAAAA
+#define USER_UNAVALIBLE_E 0xFF00
+#define REQUEST_USER_LIST_E 0x00FF
+#define REPLY_USER_LIST_E 0x5A5A
+#define DATA_E 0xA5A5
+#define DISCONTINUE_COMM_E 0xF0F0
+#define DUMMY_E 0x0F0F
+
 
 #define terminalFDPOLL 0
 #define udpFDPOLL 1
@@ -75,4 +87,6 @@ void checkSTDIN();
 void sendDataMessage(std::string Message);
 void generateList();
 void clearline();
+void writeEncryptedDataChunk(struct Client clientInfo, uint8_t* raw_message, uint32_t messageLength );
+int proccessEncryptedDataChunk(struct Client clientInfo, uint8_t* encryptedDataChunk);
 int getTarget(std::string &target);

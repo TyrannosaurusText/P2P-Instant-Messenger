@@ -19,6 +19,9 @@ struct Client {
     int tcpSockFd = -1;
     int block = 0;
     std::string leftOverMsg = "";
+	int connectionType = 0; //1 for encrypted session
+	uint64_t sessionID=0;
+	uint64_t seqNum=0;
 };
 
 struct Pair {
@@ -1440,6 +1443,66 @@ int getTarget(std::string &target)
 void clearline() {
     printf("\33[2K\r");
 }
+
+
+//converts unencrtyped message into chunks of encrypted messages and sends to client
+void writeEncryptedDataChunk(struct Client clientInfo, uint8_t* raw_message, uint32_t messageLength )
+{
+	int type = getType(raw_message);
+	short newType;
+	switch(type) //translates messageType
+	{
+		case ESTABLISH_COMM: newType = ESTABLISH_COMM_E; break;
+		case DISCONTINUE_COMM: newType = DISCONTINUE_COMM_E; break;
+		case ACCEPT_COMM: newType = ACCEPT_COMM_E; break;
+		case USER_UNAVALIBLE: newType = USER_UNAVALIBLE_E; break;
+		case REQUEST_USER_LIST: newType = REQUEST_USER_LIST_E; break;
+		case REPLY_USER_LIST: newType = REPLY_USER_LIST_E; break;
+		case DATA: newType = DATA_E; break;
+		default: newType = DUMMY_E;
+	}
+	uint8_t encryptedDataChunk[70];
+	strcpy((char*)encryptedDataChunk,"P2PI");
+	*(encryptedDataChunk+4) = htons(ENCRYPTED_DATA_CHUNK_MESSAGE);
+	*(encryptedDataChunk+6) = htons(newType); 
+	uint8_t bytesSent = 0;
+	while(messageLength > bytesSent) //max length encryted message is 62.
+	{
+		memcpy(encryptedDataChunk+8, raw_message+6+bytesSent, 
+			(62 < messageLength-bytesSent? 62 : messageLength-bytesSent));
+		if(messageLength-bytesSent < 62)
+			GenerateRandomString(encryptedDataChunk+6+messageLength-bytesSent,62-messageLength-bytesSent, clientInfo.seqNum+1);
+		bytesSent+=62;
+		PrivateEncryptDecrypt(encryptedDataChunk+6, 64, clientInfo.seqNum+1);
+		clientInfo.seqNum++;
+		if(0> write(clientInfo.tcpSockFd, encryptedDataChunk, 70))
+		{
+			die("failed to send encrypted message");
+		}
+	}
+}
+
+//return decrypted Type
+int proccessEncryptedDataChunk(struct Client clientInfo, uint8_t* encryptedDataChunk)
+{
+	PrivateEncryptDecrypt(encryptedDataChunk+6, 64, clientInfo.seqNum-1);
+	clientInfo.seqNum--;
+	int type = getType(encryptedDataChunk+2); //"P2PI0x000D(TYPE)";
+	int newType = 0;
+	switch(type) //translates messageType
+	{
+		case ESTABLISH_COMM_E: newType = ESTABLISH_COMM; break;
+		case DISCONTINUE_COMM_E: newType = DISCONTINUE_COMM; break;
+		case ACCEPT_COMM_E: newType = ACCEPT_COMM; break;
+		case USER_UNAVALIBLE_E: newType = USER_UNAVALIBLE; break;
+		case REQUEST_USER_LIST_E: newType = REQUEST_USER_LIST; break;
+		case REPLY_USER_LIST_E: newType = REPLY_USER_LIST; break;
+		case DATA_E: newType = DATA; break;
+		default: newType = -1;
+	}
+	return newType;
+}
+
 
 void login_prompt()
 {
