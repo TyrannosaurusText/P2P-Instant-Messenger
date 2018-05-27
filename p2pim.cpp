@@ -164,8 +164,7 @@ int main(int argc, char** argv) {
                     PublicEncryptDecrypt(secretData, P2PI_TRUST_E, P2PI_TRUST_N);
                     tprint("encrypted Secret: %lu\n",secretData);
                     
-                    *((uint32_t*)(reqAuthMsg + 6)) =  htonl(secretData >> 32);
-                    *((uint32_t*)(reqAuthMsg + 10)) =  htonl(secretData);
+                    *((uint64_t*)(reqAuthMsg + 6)) =  htonll(secretData);
 					tprint("val manual: %lu\n", *((uint64_t*)(reqAuthMsg + 6)));
                     tprint("val htonll: %lu\n", htonll(secretData));
                     memcpy(reqAuthMsg + 14, username.c_str(), username.length());
@@ -671,12 +670,7 @@ void connectToClient(std::string clientName) {
     }
 }
 
-uint64_t htonll(uint64_t val){
-	return ((uint64_t)(htonl(val>>32))<<32) + (uint64_t)htonl((val));
-}
-uint64_t ntohll(uint64_t lav){
-	return ((uint64_t)(ntohl(lav>>32))<<32) + (uint64_t)ntohl((lav));
-}
+
 
 std::unordered_map<std::string, struct Client>::iterator findClientByFd(int fd) {
     return clientMap.find(tcpConnMap.find(fd)->second);
@@ -839,18 +833,18 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
 
                     tprint("Found authority host %s\n", gethostbyaddr((void*)(&udpClientAddr.sin_addr), udpClientAddrLen, AF_INET)->h_name);
 
-                    uint64_t secretNum = ntohll(bitswap(*(uint64_t*)(incomingUDPMsg + 6)));
+                    uint64_t secretNum = ntohll((*(uint64_t*)(incomingUDPMsg + 6)));
 
                     uint64_t new_public_key = 
-						ntohll(bitswap(*(uint64_t*)(incomingUDPMsg + 14 + username.length() + 1)));
+						ntohll((*(uint64_t*)(incomingUDPMsg + 14 + username.length() + 1)));
                     //tprint("key: %lu\n", new_public_key);
                     uint64_t new_modulus = 
-						ntohll(bitswap(*(uint64_t*)(incomingUDPMsg + 14 + username.length() + 9)));
+						ntohll((*(uint64_t*)(incomingUDPMsg + 14 + username.length() + 9)));
                     //tprint("mod: %lu\n", new_modulus);
                     PublicEncryptDecrypt(secretNum, P2PI_TRUST_E, P2PI_TRUST_N);
                     //tprint("val: %lu\n", secretNum);
 
-                    uint64_t checksum = ntohll(bitswap(*(uint64_t*)(incomingUDPMsg + 14 + username.length() + 17)));
+                    uint64_t checksum = ntohll((*(uint64_t*)(incomingUDPMsg + 14 + username.length() + 17)));
                     PublicEncryptDecrypt(checksum, P2PI_TRUST_E, P2PI_TRUST_N);
                     if((uint32_t)(checksum) != AuthenticationChecksum(secretNum, username.c_str(), new_public_key, new_modulus)) {
                         tprint("Checksum does not match\n");
@@ -922,8 +916,8 @@ void checkTCPConnections() {
                         read(it->fd, &public_key, 8);
                         read(it->fd, &public_key_modulus, 8);
 
-                        public_key = ntohll(bitswap(public_key));
-                        public_key_modulus = ntohll(bitswap(public_key_modulus));
+                        public_key = ntohll((public_key));
+                        public_key_modulus = ntohll((public_key_modulus));
                     }
                     // recvLen = read(it->fd, newClientNameArr, 32);
 
@@ -1641,7 +1635,14 @@ void login_prompt()
         }
     }
 }
-
+uint64_t htonll(uint64_t val){
+	val = bitswap(val);
+	return ((uint64_t)(htonl(val>>32))<<32) + (uint64_t)htonl((val));
+}
+uint64_t ntohll(uint64_t lav){
+	lav = bitswap(lav);
+	return ((uint64_t)(ntohl(lav>>32))<<32) + (uint64_t)ntohl((lav));
+}
 
 uint64_t bitswap(uint64_t val)
 {
