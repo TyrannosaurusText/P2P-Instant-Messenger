@@ -2,3 +2,4 @@ p2pim
 Examples/*
 *.o
 *.gch
+*.d

@@ -1,13 +1,36 @@
-CFLAGS = -std=c++11 -g
+targets	:= p2pim
+objs := \
+	p2pim.o \
+	EncryptionLibrary.o \
 
-p2pim : p2pim.o EncryptionLibrary.o
-	$(CXX) $(CFLAGS) $^ -o $@
+CXX := g++
+CFLAGS := -std=c++11
 
-p2pim.o : p2pim.cpp p2pim.h EncryptionLibrary.h
-	$(CXX) $(CFLAGS) $^ -c
+ifneq ($(V), 1)
+	Q = @
+	V = 0
+endif
 
-EncryptionLibrary.o : EncryptionLibrary.cpp EncryptionLibrary.h
-	$(CXX) $(CFLAGS) $^ -c
+ifeq ($(D), 1)
+	CFLAGS += -g
+else
+	D = 0
+endif
+
+all: $(targets)
+
+deps := $(patsubst %.o, %.d, $(objs))
+-include $(deps)
+DEPFLAGS = -MMD -MF $(@:.o=.d)
+
+$(targets) : $(objs)
+	@echo "CXX $@"
+	$(Q)$(CXX) $(CFLAGS) -o $@ $^ $(DEPFLAGS)
+
+%.o : %.cpp
+	@echo "CXX $@"
+	$(Q)$(CXX) $(CFLAGS) -c -o $@ $< $(DEPFLAGS)
 
 clean :
-	rm -rf p2pim p2pim.o EncryptionLibrary.o
+	@echo "CLEAN"
+	$(Q)rm -f $(targets) $(objs) $(deps)

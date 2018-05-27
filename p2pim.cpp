@@ -24,6 +24,8 @@ struct Client {
     int connectionType = 0; //1 for encrypted session
     uint64_t sessionID = 0;
     uint64_t seqNum = 0;
+    uint64_t public_key = 0;
+    uint64_t public_key_modulus = 0;
 };
 
 struct Pair {
@@ -162,10 +164,10 @@ int main(int argc, char** argv) {
                     PublicEncryptDecrypt(secretData, P2PI_TRUST_E, P2PI_TRUST_N);
                     tprint("encrypted Secret: %lu\n",secretData);
                     
-                    *((uint64_t*)(reqAuthMsg + 6)) =  htonl(secretData >> 32);
-                    *((uint64_t*)(reqAuthMsg + 10)) =  htonl(secretData);
-					tprint("val: %lu\n", htonll(secretData));
-					tprint("val: %lu\n", (((uint64_t)htonl(secretData >> 32)<<32)+htonl(secretData)));
+                    *((uint32_t*)(reqAuthMsg + 6)) =  htonl(secretData >> 32);
+                    *((uint32_t*)(reqAuthMsg + 10)) =  htonl(secretData);
+					tprint("val: %lu\n", *((uint64_t*)(reqAuthMsg + 6)));
+                    tprint("val: %lu\n", ((((uint64_t)htonl(secretData >> 32)) << 32) + htonl(secretData)));
                     memcpy(reqAuthMsg + 14, username.c_str(), username.length());
                     
                     
@@ -634,7 +636,7 @@ void connectToClient(std::string clientName) {
         client2ConnetAddr.sin_port = htons(it->second.tcpPort);
 
         int newConn = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if(0 > connect(newConn, (struct sockaddr *)&client2ConnetAddr, sizeof(client2ConnetAddr)))
+        if(0 > connect(newConn, (struct sockaddr*)&client2ConnetAddr, sizeof(client2ConnetAddr)))
             die("Failed to connect to host.");
 
         dprint("CONNECTED TO NEW HOST\n");
@@ -645,12 +647,12 @@ void connectToClient(std::string clientName) {
 
         memset(ECM, 0, ECMLen);
         memcpy(ECM, "P2PI", 4);
-        *((uint16_t*)(ECM + 4)) = htons((encryptMode==0?ESTABLISH_COMM:ESTABLISH_ENCRYPTED_COMM));
+        *((uint16_t*)(ECM + 4)) = htons((encryptMode == 0 ? ESTABLISH_COMM : ESTABLISH_ENCRYPTED_COMM));
         memcpy((uint16_t*)(ECM + 6), username.c_str(), username.length());
         dprint("New client name is %s\n", username.c_str());
-		if(encryptMode==1)
+		if(encryptMode == 1)
 		{
-			ECMLen+= 16;
+			ECMLen += 16;
 			*((uint64_t*)(ECM + 6 + username.length() + 1)) = htonll(public_key);			
 			*((uint64_t*)(ECM + 6 + username.length() + 1 + 8)) = htonll(public_key_modulus);
 		}
@@ -885,7 +887,7 @@ void checkTCPConnections() {
                 sendTCPMessage(DISCONTINUE_COMM, it->fd);
 
                 if(findClientByFd(it->fd) != clientMap.end())
-                        findClientByFd(it->fd)->second.tcpSockFd = -1;
+                    findClientByFd(it->fd)->second.tcpSockFd = -1;
                 tcpConnMap.erase(tcpConnMap.find(it->fd));
 
                 if(it->fd == currentConnection) {
@@ -903,9 +905,10 @@ void checkTCPConnections() {
             dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
 
             switch(type) {
-                case ESTABLISH_COMM: {
+                case ESTABLISH_ENCRYPTED_COMM || ESTABLISH_COMM: {
                     int j = 0, recvLen;
                     char newClientNameArr[32];
+                    int public_key = 0, public_key_modulus = 0;
 
                     // Read until the first null byte
                     do {
@@ -914,6 +917,14 @@ void checkTCPConnections() {
                             break;
                         j++;
                     } while(1);
+
+                    if(type == ESTABLISH_ENCRYPTED_COMM) {
+                        read(it->fd, &public_key, 8);
+                        read(it->fd, &public_key_modulus, 8);
+
+                        public_key = ntohll(bitswap(public_key));
+                        public_key_modulus = ntohll(bitswap(public_key_modulus));
+                    }
                     // recvLen = read(it->fd, newClientNameArr, 32);
 
                     std::string newClientName = newClientNameArr;
@@ -928,8 +939,11 @@ void checkTCPConnections() {
                         continue;
                     }
 
-                    uint8_t ECM[6];
-                    int ECMLen = 6;
+                    clientMap.find(newClientName)->second.public_key_modulus = public_key_modulus;
+                    clientMap.find(newClientName)->second.public_key = public_key;
+
+                    uint8_t ECM[22];
+                    int ECMLen = type == ESTABLISH_COMM ? 6 : 22;
                     memcpy(ECM, "P2PI", 4);
 
                     if(away == 1 || clientMap.find(newClientName)->second.block) {
@@ -946,10 +960,25 @@ void checkTCPConnections() {
                     }
                     else {
                         // Send accept comm message
-                        *((uint16_t*)(ECM + 4)) = htons(ACCEPT_COMM);
+                        *((uint16_t*)(ECM + 4)) = type == ESTABLISH_COMM ? htons(ACCEPT_COMM) : htons(ACCEPT_ENCRYPTED_COMM);
                         clientMap.find(newClientName)->second.tcpSockFd = it->fd;
                         tcpConnMap[it->fd] = newClientName;
-                        if(write(it->fd, ECM, 6) < 0) {
+
+                        if(type == ESTABLISH_ENCRYPTED_COMM) {
+                            uint64_t sessionKey = GenerateRandomValue();
+
+                            // Extract high 32bit
+                            uint64_t high32b = sessionKey >> 32;
+                            PublicEncryptDecrypt(high32b, P2PI_TRUST_E, P2PI_TRUST_N);
+                            // low 32bit
+                            uint64_t low32b = sessionKey;
+                            PublicEncryptDecrypt(low32b, P2PI_TRUST_E, P2PI_TRUST_N);
+
+                            *((uint64_t*)(ECM + 6)) = htonll(high32b);
+                            *((uint64_t*)(ECM + 14)) = htonll(low32b);
+                        }
+
+                        if(write(it->fd, ECM, ECMLen) < 0) {
                             die("Failed to establish TCP connection.");
                         }
                         tprint("Accepting connection from: %s\n", newClientName.c_str());
@@ -1490,7 +1519,7 @@ void clearline() {
 }
 
 //converts unencrtyped message into chunks of encrypted messages and sends to client
-void writeEncryptedDataChunk(struct Client clientInfo, uint8_t* raw_message, uint32_t messageLength )
+void writeEncryptedDataChunk(struct Client clientInfo, uint8_t* raw_message, uint32_t messageLength)
 {
     int type = getType(raw_message);
     short newType;
@@ -1506,20 +1535,20 @@ void writeEncryptedDataChunk(struct Client clientInfo, uint8_t* raw_message, uin
         default: newType = DUMMY_E;
     }
     uint8_t encryptedDataChunk[70];
-    strcpy((char*)encryptedDataChunk,"P2PI");
-    *(encryptedDataChunk+4) = htons(ENCRYPTED_DATA_CHUNK_MESSAGE);
-    *(encryptedDataChunk+6) = htons(newType); 
+    strcpy((char*)encryptedDataChunk, "P2PI");
+    *(encryptedDataChunk + 4) = htons(ENCRYPTED_DATA_CHUNK_MESSAGE);
+    *(encryptedDataChunk + 6) = htons(newType); 
     uint8_t bytesSent = 0;
     while(messageLength > bytesSent) //max length encryted message is 62.
     {
-        memcpy(encryptedDataChunk+8, raw_message+6+bytesSent, 
-            (62 < messageLength-bytesSent? 62 : messageLength-bytesSent));
+        memcpy(encryptedDataChunk + 8, raw_message + 6 + bytesSent, 
+            (64 < messageLength - bytesSent? 62 : messageLength - bytesSent));
         if(messageLength-bytesSent < 62)
-            GenerateRandomString(encryptedDataChunk+6+messageLength-bytesSent,62-messageLength-bytesSent, clientInfo.seqNum+1);
-        bytesSent+=62;
-        PrivateEncryptDecrypt(encryptedDataChunk+6, 64, clientInfo.seqNum+1);
+            GenerateRandomString(encryptedDataChunk + 6 + messageLength - bytesSent, 62 - messageLength - bytesSent, clientInfo.seqNum + 1);
+        bytesSent += 62;
+        PrivateEncryptDecrypt(encryptedDataChunk + 6, 62, clientInfo.seqNum +1);
         clientInfo.seqNum++;
-        if(0> write(clientInfo.tcpSockFd, encryptedDataChunk, 70))
+        if(0 > write(clientInfo.tcpSockFd, encryptedDataChunk, 70))
         {
             die("failed to send encrypted message");
         }
@@ -1529,7 +1558,7 @@ void writeEncryptedDataChunk(struct Client clientInfo, uint8_t* raw_message, uin
 //return decrypted Type
 int proccessEncryptedDataChunk(struct Client clientInfo, uint8_t* encryptedDataChunk)
 {
-    PrivateEncryptDecrypt(encryptedDataChunk+6, 64, clientInfo.seqNum-1);
+    PrivateEncryptDecrypt(encryptedDataChunk + 6, 64, clientInfo.seqNum - 1);
     clientInfo.seqNum--;
     int type = getType(encryptedDataChunk+2); //"P2PI0x000D(TYPE)";
     int newType = 0;
