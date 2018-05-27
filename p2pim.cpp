@@ -166,8 +166,8 @@ int main(int argc, char** argv) {
                     
                     *((uint32_t*)(reqAuthMsg + 6)) =  htonl(secretData >> 32);
                     *((uint32_t*)(reqAuthMsg + 10)) =  htonl(secretData);
-					tprint("val: %lu\n", *((uint64_t*)(reqAuthMsg + 6)));
-                    tprint("val: %lu\n", ((((uint64_t)htonl(secretData >> 32)) << 32) + htonl(secretData)));
+					tprint("val manual: %lu\n", *((uint64_t*)(reqAuthMsg + 6)));
+                    tprint("val htonll: %lu\n", htonll(secretData));
                     memcpy(reqAuthMsg + 14, username.c_str(), username.length());
                     
                     
