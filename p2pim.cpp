@@ -9,7 +9,7 @@
 
 
 enum Option {USERNAME, UDP_PORT, TCP_PORT, MIN_TIMEOUT, MAX_TIMEOUT, HOST, TA_UDP_PORT, AUTH_HOST};
-enum Command {CONNECT, LIST, DISCONNECT, GETLIST, HELP, SWITCH, AWAY, UNAWAY, BLOCK, UNBLOCK, EXIT};
+enum Command {CONNECT, LIST, DISCONNECT, GETLIST, HELP, SWITCH, AWAY, UNAWAY, BLOCK, UNBLOCK, EXIT, ENCRYPT};
 enum AuthStatus {NONE, BAD, GOOD};
 
 struct Client {
@@ -40,7 +40,7 @@ static std::unordered_map<std::string, int> commandMap {
     {"\\connect", CONNECT}, {"\\c", CONNECT}, {"\\switch", SWITCH},
     {"\\list", LIST}, {"\\disconnect", DISCONNECT}, {"\\getlist", GETLIST},
     {"\\help", HELP}, {"\\away", AWAY}, {"\\unaway", UNAWAY},
-    {"\\block", BLOCK}, {"\\unblock", UNBLOCK}, {"\\exit", EXIT}
+    {"\\block", BLOCK}, {"\\unblock", UNBLOCK}, {"\\exit", EXIT}, {"\\encrypt", ENCRYPT}
 };
 
 
@@ -52,6 +52,7 @@ int tcpPort = 50551;
 int taUDPPort = 50552;
 int gMinTimeout = 5000;
 int gMaxTimeout = 60000;
+int encryptMode = 0;
 struct in_addr gIPAddr, gSubnetMask;
 
 uint8_t outgoingUDPMsg[MAX_UDP_MSG_LEN];
@@ -163,6 +164,8 @@ int main(int argc, char** argv) {
                     
                     *((uint64_t*)(reqAuthMsg + 6)) =  htonl(secretData >> 32);
                     *((uint64_t*)(reqAuthMsg + 10)) =  htonl(secretData);
+					tprint("val: %lu\n", htonll(secretData));
+					tprint("val: %lu\n", (((uint64_t)htonl(secretData >> 32)<<32)+htonl(secretData)));
                     memcpy(reqAuthMsg + 14, username.c_str(), username.length());
                     
                     
@@ -637,18 +640,23 @@ void connectToClient(std::string clientName) {
         dprint("CONNECTED TO NEW HOST\n");
 
         // Send ESTABLISH COMMUNICATION MSG
-        uint8_t ECM[39];
+        uint8_t ECM[55];
         int ECMLen = 4 + 2 + username.length() + 1;
 
         memset(ECM, 0, ECMLen);
         memcpy(ECM, "P2PI", 4);
-        *((uint16_t*)(ECM + 4)) = htons(ESTABLISH_COMM);
+        *((uint16_t*)(ECM + 4)) = htons((encryptMode==0?ESTABLISH_COMM:ESTABLISH_ENCRYPTED_COMM));
         memcpy((uint16_t*)(ECM + 6), username.c_str(), username.length());
         dprint("New client name is %s\n", username.c_str());
-
-        if(write(newConn, ECM, ECMLen) < 0)
-            die("Failed to send ESTABLISH COMM message.");
-
+		if(encryptMode==1)
+		{
+			ECMLen+= 16;
+			*((uint64_t*)(ECM + 6 + username.length() + 1)) = htonll(public_key);			
+			*((uint64_t*)(ECM + 6 + username.length() + 1 + 8)) = htonll(public_key_modulus);
+		}
+		if(write(newConn, ECM, ECMLen) < 0)
+			die("Failed to send ESTABLISH COMM message.");
+	
         // Record the newly connected tcp socket
         clientMap.find(clientName)->second.tcpSockFd = newConn;
         tcpConnMap[newConn] = clientName;
@@ -659,6 +667,13 @@ void connectToClient(std::string clientName) {
         newPollFd.events = POLLIN;
         pollFd.push_back(newPollFd);
     }
+}
+
+uint64_t htonll(uint64_t val){
+	return ((uint64_t)(htonl(val>>32))<<32) + (uint64_t)htonl((val));
+}
+uint64_t ntohll(uint64_t lav){
+	return ((uint64_t)(ntohl(lav>>32))<<32) + (uint64_t)ntohl((lav));
 }
 
 std::unordered_map<std::string, struct Client>::iterator findClientByFd(int fd) {
@@ -810,7 +825,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     if(clientMap.empty()) {
                         dprint("CLOSING...\n");
                         currTimeout = 0;
-                        // Resets timeout value
+							// Resets timeout value
                         baseTimeout = gMinTimeout;
                         dprint("basetimeout is %d\n", baseTimeout);
                     }
@@ -822,24 +837,18 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
 
                     tprint("Found authority host %s\n", gethostbyaddr((void*)(&udpClientAddr.sin_addr), udpClientAddrLen, AF_INET)->h_name);
 
-                    uint64_t secretMsg1 = (ntohl(*(uint32_t*)(incomingUDPMsg + 6)));
-                    uint64_t secretMsg2 = (ntohl(*(uint32_t*)(incomingUDPMsg + 10)));
-                    uint64_t secretNum = ((secretMsg1 << 32) + secretMsg2);
-                    uint64_t public_key1 = (ntohl(*(uint32_t*)(incomingUDPMsg + 14 + username.length() + 1)));
-                    uint64_t public_key2 = (ntohl(*(uint32_t*)(incomingUDPMsg + 14 + username.length() + 5)));
-                    uint64_t new_public_key = ((public_key1 << 32) + public_key2);
-                    // tprint("key: %lu\n", new_public_key);
-                    uint64_t modulus1 = (ntohl(*(uint32_t*)(incomingUDPMsg + 14 + username.length() + 9)));
-                    uint64_t modulus2 = (ntohl(*(uint32_t*)(incomingUDPMsg + 14 + username.length() + 13)));
-                    uint64_t new_modulus = ((modulus1 << 32) + modulus2);
-                    // tprint("mod: %lu\n", new_modulus);
-                    PublicEncryptDecrypt(secretNum, P2PI_TRUST_E, P2PI_TRUST_N);
-                    // tprint("val: %lu\n", secretNum);
-                    
+                    uint64_t secretNum = ntohll(bitswap(*(uint64_t*)(incomingUDPMsg + 6)));
 
-                    uint64_t checksum1 = (ntohl(*(uint32_t*)(incomingUDPMsg + 14 + username.length() + 17)));
-                    uint64_t checksum2 = (ntohl(*(uint32_t*)(incomingUDPMsg + 14 + username.length() + 21)));
-                    uint64_t checksum = ((checksum1 << 32) + checksum2);
+                    uint64_t new_public_key = 
+						ntohll(bitswap(*(uint64_t*)(incomingUDPMsg + 14 + username.length() + 1)));
+                    //tprint("key: %lu\n", new_public_key);
+                    uint64_t new_modulus = 
+						ntohll(bitswap(*(uint64_t*)(incomingUDPMsg + 14 + username.length() + 9)));
+                    //tprint("mod: %lu\n", new_modulus);
+                    PublicEncryptDecrypt(secretNum, P2PI_TRUST_E, P2PI_TRUST_N);
+                    //tprint("val: %lu\n", secretNum);
+
+                    uint64_t checksum = ntohll(bitswap(*(uint64_t*)(incomingUDPMsg + 14 + username.length() + 17)));
                     PublicEncryptDecrypt(checksum, P2PI_TRUST_E, P2PI_TRUST_N);
                     if((uint32_t)(checksum) != AuthenticationChecksum(secretNum, username.c_str(), new_public_key, new_modulus)) {
                         tprint("Checksum does not match\n");
@@ -850,16 +859,13 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     }
                     else if(new_public_key == public_key && new_modulus == public_key_modulus) {
                         tprint("Password provided has been authenticated.\n");
-                        auth = GOOD;
-                    }
-                   
+					}   
                     break;
                 }
             }
         }
     }
 }
-
 void checkTCPConnections() {
     for(auto it = pollFd.begin() + 3; it != pollFd.end();) {
         // dprint("Checking %d at %d\n", i, pollFd[i].fd);
@@ -1142,6 +1148,9 @@ void checkTCPConnections() {
                     it = pollFd.erase(it);
                     continue;
                 }
+				case ENCRYPTED_DATA_CHUNK_MESSAGE: {
+					break;
+				}
                 default: {
                     fprintf(stderr, "\nINVALID MESSAGE\n");
                     break;
@@ -1256,7 +1265,6 @@ void checkSTDIN() {
 
                                 if(write(currentConnection, outgoingTCPMsg, 6) < 0){
                                     die("Failed to send TCP message.");
-                                    //TODO:
                                     break;
                                 }
                                 if(tcpConnMap.find(currentConnection) != tcpConnMap.end()) {
@@ -1297,6 +1305,8 @@ void checkSTDIN() {
                             tprint("\\unaway\n\t-brings self back from away.\n");
                             tprint("\\block username\n\t-when you don't want to talk to that person\n");
                             tprint("\\unblock username\n\t-when you want to become friend with someone again\n");
+							tprint("\\encrypt\n\t- enables/disables encrypted sending");
+							tprint("\\exit\n\t- closes program\n");
                             break;
                         }
 
@@ -1385,6 +1395,24 @@ void checkSTDIN() {
                         case EXIT: {
                             raise(SIGINT);
                         }
+						case ENCRYPT:
+						{
+							if(encryptMode == 1)
+							{
+								encryptMode = 0;
+								tprint("Encryption off.\n");
+							}
+							else if( auth == GOOD )
+							{
+								encryptMode = 1;
+								tprint("Encryption on.\n");
+							}
+							else 
+							{
+								tprint("Authentication Required.\n");
+							}
+							break;
+						}
                     }
                 }
                 else if(currentConnection != -1){
@@ -1583,4 +1611,10 @@ void login_prompt()
         buffer.clear();
         }
     }
+}
+
+
+uint64_t bitswap(uint64_t val)
+{
+	return (val>>32) + (val<<32);
 }
