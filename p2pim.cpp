@@ -141,7 +141,6 @@ int main(int argc, char** argv) {
                 currTimeout = baseTimeout;
 
                 if(auth == NONE) {
-
                     tprint("sending auth discovery\n");
                     // Send request authenicated key message
                 
@@ -854,6 +853,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                         auth = BAD;
                     }
                     else if(new_public_key == public_key && new_modulus == public_key_modulus) {
+                        auth = GOOD;
                         tprint("Password provided has been authenticated.\n");
 					}   
                     break;
@@ -899,10 +899,11 @@ void checkTCPConnections() {
             dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
 
             switch(type) {
-                case ESTABLISH_ENCRYPTED_COMM || ESTABLISH_COMM: {
+                case ESTABLISH_ENCRYPTED_COMM:
+                case ESTABLISH_COMM: {
                     int j = 0, recvLen;
                     char newClientNameArr[32];
-                    int public_key = 0, public_key_modulus = 0;
+                    uint64_t client_public_key = 0, client_public_key_modulus = 0;
 
                     // Read until the first null byte
                     do {
@@ -913,12 +914,18 @@ void checkTCPConnections() {
                     } while(1);
 
                     if(type == ESTABLISH_ENCRYPTED_COMM) {
-                        read(it->fd, &public_key, 8);
-                        read(it->fd, &public_key_modulus, 8);
+                        if(read(it->fd, &client_public_key, 8) < 0)
+                            die("Failed to read public key in ESTABLISH_ENCRYPTED_COMM");
+                        if(read(it->fd, &client_public_key_modulus, 8) < 0)
+                            die("Failed to read public key modulus in ESTABLISH_ENCRYPTED_COMM");
 
-                        public_key = ntohll((public_key));
-                        public_key_modulus = ntohll((public_key_modulus));
+                        client_public_key = ntohll((client_public_key));
+                        client_public_key_modulus = ntohll((client_public_key_modulus));
+
+                        tprint("ESTABLISH_ENCRYPTED_COMM\n");
                     }
+                    else
+                        tprint("establish\n");
                     // recvLen = read(it->fd, newClientNameArr, 32);
 
                     std::string newClientName = newClientNameArr;
@@ -933,8 +940,10 @@ void checkTCPConnections() {
                         continue;
                     }
 
-                    clientMap.find(newClientName)->second.public_key_modulus = public_key_modulus;
-                    clientMap.find(newClientName)->second.public_key = public_key;
+                    clientMap.find(newClientName)->second.public_key_modulus = client_public_key_modulus;
+                    clientMap.find(newClientName)->second.public_key = client_public_key;
+                    tprint("key is %lu, modulus is %lu\n", client_public_key, client_public_key_modulus);
+
 
                     uint8_t ECM[22];
                     int ECMLen = type == ESTABLISH_COMM ? 6 : 22;
@@ -959,14 +968,21 @@ void checkTCPConnections() {
                         tcpConnMap[it->fd] = newClientName;
 
                         if(type == ESTABLISH_ENCRYPTED_COMM) {
+                            tprint("ESTABLISH_ENCRYPTED_COMM\n");
                             uint64_t sessionKey = GenerateRandomValue();
 
                             // Extract high 32bit
-                            uint64_t high32b = sessionKey >> 32;
-                            PublicEncryptDecrypt(high32b, P2PI_TRUST_E, P2PI_TRUST_N);
+                            uint64_t high32b = (uint32_t)(sessionKey >> 32);
+                            tprint("high32b %lu\n", high32b);
+                            tprint("key is %lu, modulus is %lu\n", findClientByFd(it->fd)->second.public_key, findClientByFd(it->fd)->second.public_key_modulus);
+                            // PublicEncryptDecrypt(high32b, P2PI_TRUST_E, P2PI_TRUST_N);
+                            PublicEncryptDecrypt(high32b, findClientByFd(it->fd)->second.public_key, findClientByFd(it->fd)->second.public_key_modulus);
                             // low 32bit
-                            uint64_t low32b = sessionKey;
-                            PublicEncryptDecrypt(low32b, P2PI_TRUST_E, P2PI_TRUST_N);
+                            uint64_t low32b = (uint32_t)sessionKey;
+                            tprint("low32b %lu\n", low32b);
+
+                            // PublicEncryptDecrypt(low32b, P2PI_TRUST_E, P2PI_TRUST_N);
+                            PublicEncryptDecrypt(low32b, findClientByFd(it->fd)->second.public_key, findClientByFd(it->fd)->second.public_key_modulus);
 
                             *((uint64_t*)(ECM + 6)) = htonll(high32b);
                             *((uint64_t*)(ECM + 14)) = htonll(low32b);
@@ -982,8 +998,28 @@ void checkTCPConnections() {
                     break;
                     // }
                 }
-                case ACCEPT_COMM: {
+                case ACCEPT_ENCRYPTED_COMM: 
+                case ACCEPT_COMM:{
                     tprint("Connected to user %s\n", tcpConnMap.find(it->fd)->second.c_str());
+
+                    if(type == ACCEPT_ENCRYPTED_COMM) {
+                        uint64_t high32b, low32b; 
+                        if(read(it->fd, &high32b, 8) < 0)
+                            die("Failed to read seq high.");
+                        if(read(it->fd, &low32b, 8) < 0)
+                            die("Failed to read seq low.");
+
+                        high32b = ntohll(high32b);
+                        low32b = ntohll(low32b);
+
+                        // PublicEncryptDecrypt(high32b, P2PI_TRUST_E, P2PI_TRUST_N);
+                        PublicEncryptDecrypt(high32b, private_key, public_key_modulus);
+                        // PublicEncryptDecrypt(low32b, P2PI_TRUST_E, P2PI_TRUST_N);
+                        PublicEncryptDecrypt(low32b, private_key, public_key_modulus);
+
+                        tprint("ACCEPT_ENCRYPTED_COMM low32b %u\n", (uint32_t)low32b);
+                        tprint("ACCEPT_ENCRYPTED_COMM high32b %u\n", (uint32_t)high32b);
+                    }
                     break;
                 }
                 case USER_UNAVALIBLE: {
