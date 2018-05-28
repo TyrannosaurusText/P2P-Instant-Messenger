@@ -890,9 +890,12 @@ void checkTCPConnections() {
 
                 close(it->fd);
                 it = pollFd.erase(it);
+
+                tprint("Invalid signature\n");
             }
 
             int type = getType(incomingTCPMsg);
+            tprint("type is %lx\n", type);
 
             dprint("RECV: %d\n", type);
             dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
@@ -1208,10 +1211,12 @@ void checkTCPConnections() {
                     continue;
                 }
 				case ENCRYPTED_DATA_CHUNK_MESSAGE: {
+                    tprint("ENCRYPTED_DATA_CHUNK_MESSAGE\n");
+
 					break;
 				}
                 default: {
-                    fprintf(stderr, "\nINVALID MESSAGE\n");
+                    fprintf(stderr, "\nINVALID MESSAGE: type %lx\n", type);
                     break;
                 }
             }
@@ -1608,7 +1613,7 @@ int proccessEncryptedDataChunk(struct Client clientInfo, uint8_t* encryptedDataC
 
 void login_prompt()
 {
-    std::string password;
+    std::string password = "";
     tprint("Enter password for %s>", username.c_str());
     fflush(STDIN_FILENO);
     std::string passwordmask = "";
@@ -1665,16 +1670,26 @@ void login_prompt()
 
         printf("Enter password for %s>%s",username.c_str(), passwordmask.c_str());
 
-        //printf("\033[0C");
+        // printf("\033[0C");
         fflush(STDIN_FILENO);
         buffer.clear();
         }
-    }
+    }    
+
+    buffer.clear(); 
 }
+
+
 uint64_t htonll(uint64_t val){
-	
-	return (uint64_t)(htonl(val>>32)) + ((uint64_t)htonl(val)<<32);
+	val = bitswap(val);
+	return ((uint64_t)(htonl(val>>32))<<32) + (uint64_t)htonl((val));
 }
 uint64_t ntohll(uint64_t lav){
-	return (uint64_t)(htonl(lav>>32)) + ((uint64_t)htonl(lav)<<32);
+	lav = bitswap(lav);
+	return ((uint64_t)(ntohl(lav>>32))<<32) + (uint64_t)ntohl((lav));
+}
+
+uint64_t bitswap(uint64_t val)
+{
+	return (val>>32) + (val<<32);
 }
