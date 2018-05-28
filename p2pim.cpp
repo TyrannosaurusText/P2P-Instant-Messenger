@@ -85,6 +85,7 @@ std::string list = "";
 int auth = NONE;
 std::vector<struct sockaddr_in> taVector;
 uint8_t reqAuthMsg[46];
+int numUnauth = 1;
 
 
 std::unordered_map<std::string, struct Client>::iterator findClientByFd(int fd);
@@ -140,12 +141,12 @@ int main(int argc, char** argv) {
                 sendUDPMessage(DISCOVERY);
                 currTimeout = baseTimeout;
             }
-            else
+            else if(numUnauth == 0)
                 currTimeout = -1;
-
-            // if(auth == NONE) {
-            //     sendReqAuthMessage(username);
-            // }
+            else if(numUnauth > 0) {
+                tprint("num unauth is %d\n", numUnauth);
+                sendReqAuthMessage(username);
+            }
         }
 
         clearline();
@@ -176,7 +177,7 @@ int main(int argc, char** argv) {
         if(0 == rc) {
             clearline();
             dprint("Next iteration at %d\n", currTimeout);
-            if(clientMap.empty()) {
+            if(clientMap.empty() || numUnauth > 0) {
                 dprint("TIMEOUT: \n");
                 // Double current timeout
                 baseTimeout *= 2;
@@ -730,6 +731,8 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                         if(clientMap.find(username_a) == clientMap.end()) {
                             tprint("\r-----NEW HOST: %s-----\n", username_a.c_str());
                             addNewClient(incomingUDPMsg);
+                            numUnauth++;
+                            sendReqAuthMessage(username_a);
                         }
                         // Should send reply regardless the host is already known
                         sendUDPMessage(REPLY);
@@ -787,28 +790,47 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
 
                     uint64_t secretNum = ntohll((*(uint64_t*)(incomingUDPMsg + 6)));
 
+                    std::string name = (char*)(incomingUDPMsg + 14);
+
                     uint64_t new_public_key = 
-						ntohll((*(uint64_t*)(incomingUDPMsg + 14 + username.length() + 1)));
+						ntohll((*(uint64_t*)(incomingUDPMsg + 14 + name.length() + 1)));
                     //tprint("key: %lu\n", new_public_key);
                     uint64_t new_modulus = 
-						ntohll((*(uint64_t*)(incomingUDPMsg + 14 + username.length() + 9)));
+						ntohll((*(uint64_t*)(incomingUDPMsg + 14 + name.length() + 9)));
                     //tprint("mod: %lu\n", new_modulus);
                     PublicEncryptDecrypt(secretNum, P2PI_TRUST_E, P2PI_TRUST_N);
                     //tprint("val: %lu\n", secretNum);
 
-                    uint64_t checksum = ntohll((*(uint64_t*)(incomingUDPMsg + 14 + username.length() + 17)));
+                    uint64_t checksum = ntohll((*(uint64_t*)(incomingUDPMsg + 14 + name.length() + 17)));
                     PublicEncryptDecrypt(checksum, P2PI_TRUST_E, P2PI_TRUST_N);
-                    if((uint32_t)(checksum) != AuthenticationChecksum(secretNum, username.c_str(), new_public_key, new_modulus)) {
+                    if((uint32_t)(checksum) != AuthenticationChecksum(secretNum, name.c_str(), new_public_key, new_modulus)) {
                         tprint("Checksum does not match\n");
                     }
-                    else if(new_modulus == 0 && new_public_key == 0) {
-                        tprint("User %s unknown by authority\n", username.c_str());
-                        auth = BAD;
+                    else if(username == name && auth == NONE) {
+                        if(new_modulus == 0 && new_public_key == 0) {
+                            tprint("User %s unknown by authority\n", name.c_str());
+                                auth = BAD;
+                        }
+                        else if(new_public_key == public_key && new_modulus == public_key_modulus) {
+                            auth = GOOD;
+                            tprint("Password provided has been authenticated.\n");
+    					}
+                        numUnauth--;
                     }
-                    else if(new_public_key == public_key && new_modulus == public_key_modulus) {
-                        auth = GOOD;
-                        tprint("Password provided has been authenticated.\n");
-					}   
+                    else if(clientMap.find(name) != clientMap.end() && clientMap.find(name)->second.auth == NONE) {
+                        tprint("discovered user auth reply\n");
+                        if(new_modulus == 0 && new_public_key == 0) {
+                            tprint("User %s unknown by authority\n", name.c_str());
+                            clientMap.find(name)->second.auth = BAD;
+                        }
+                        else {
+                            clientMap.find(name)->second.public_key_modulus = new_modulus;
+                            clientMap.find(name)->second.public_key = new_public_key;
+                            clientMap.find(name)->second.auth = GOOD;
+                            tprint("Password provided has been authenticated.\n");
+                        }
+                        numUnauth--;
+                    }
                     break;
                 }
             }
@@ -1481,7 +1503,7 @@ void generateList() {
     for( auto i : clientMap )
     {
         list += "User " + std::to_string(c) + " " + i.second.username +"@" +
-        i.second.hostName + " on UDP " + std::to_string(i.second.udpPort) + ", TCP " + std::to_string(i.second.tcpPort) + (i.second.block ? " Blocked\n" : "") + (i.second.tcpSockFd != -1 ? " Connected\n" : "\n");
+        i.second.hostName + " on UDP " + std::to_string(i.second.udpPort) + ", TCP " + std::to_string(i.second.tcpPort) + (i.second.block ? " Blocked " : "") + (i.second.tcpSockFd != -1 ? " Connected " : "") + (i.second.auth == GOOD ? " Authenticated\n" : " Unauthenticated\n");
         c++;
     }
 }
