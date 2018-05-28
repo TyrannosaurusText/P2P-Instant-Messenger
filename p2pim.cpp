@@ -26,6 +26,7 @@ struct Client {
     uint64_t seqNum = 0;
     uint64_t public_key = 0;
     uint64_t public_key_modulus = 0;
+    uint64_t sessionKey = 0;
 };
 
 struct Pair {
@@ -141,11 +142,14 @@ int main(int argc, char** argv) {
                 sendUDPMessage(DISCOVERY);
                 currTimeout = baseTimeout;
             }
-            else if(numUnauth == 0)
-                currTimeout = -1;
-            else if(numUnauth > 0) {
+            if(numUnauth > 0) {
                 tprint("num unauth is %d\n", numUnauth);
-                sendReqAuthMessage(username);
+                checkAuth();
+                currTimeout = baseTimeout;
+
+            }
+            else if(numUnauth == 0 && !clientMap.empty()) {
+                currTimeout = -1;
             }
         }
 
@@ -166,12 +170,12 @@ int main(int argc, char** argv) {
         fflush(STDIN_FILENO);
         // Wait for reply message
         gettimeofday(&start, NULL);
-        dprint("currtimeout is %d\n", currTimeout);
         int rc = poll(pollFd.data(), pollFd.size(), currTimeout);
 
         gettimeofday(&end, NULL);
         timePassed = ((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec) / 1000;
         currTimeout -= timePassed;
+
 
         // Timeout event
         if(0 == rc) {
@@ -194,7 +198,8 @@ int main(int argc, char** argv) {
             checkSTDIN();
         }
         else
-            fprintf(stderr, "\nPOLL ERROR\n");
+            tprint("\nPOLL ERROR\n");
+
     }
     ResetCanonicalMode(STDIN_FILENO, &SavedTermAttributes);
     return 0;
@@ -732,6 +737,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                             tprint("\r-----NEW HOST: %s-----\n", username_a.c_str());
                             addNewClient(incomingUDPMsg);
                             numUnauth++;
+                            tprint("num unauth is %d\n", numUnauth);
                             sendReqAuthMessage(username_a);
                         }
                         // Should send reply regardless the host is already known
@@ -747,6 +753,9 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     if(clientMap.find(username_a) == clientMap.end()) {
                         tprint("\r-----NEW HOST: %s-----\n", username_a.c_str());
                         addNewClient(incomingUDPMsg);
+                        numUnauth++;
+                        sendReqAuthMessage(username_a);
+
                         // Try to initiate tcp connection with host
                         dprint("%s\n", clientMap.begin()->first.c_str());
                         // connectToClient(clientMap.begin()->first);
@@ -778,15 +787,16 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     // tprint("hi\n");
                     // tprint("inc auth:\n")
 
-                    tprint("Found authority host %s\n", gethostbyaddr((void*)(&udpClientAddr.sin_addr), udpClientAddrLen, AF_INET)->h_name);
 
                     int found = 0;
                     for(auto v : taVector)
                         if(v.sin_addr.s_addr == udpClientAddr.sin_addr.s_addr)
                             found = 1;
                         
-                    if(found == 0)
+                    if(found == 0) {
+                        tprint("Found authority host %s\n", gethostbyaddr((void*)(&udpClientAddr.sin_addr), udpClientAddrLen, AF_INET)->h_name);
                         taVector.push_back(udpClientAddr);
+                    }
 
                     uint64_t secretNum = ntohll((*(uint64_t*)(incomingUDPMsg + 6)));
 
@@ -809,12 +819,17 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     else if(username == name && auth == NONE) {
                         if(new_modulus == 0 && new_public_key == 0) {
                             tprint("User %s unknown by authority\n", name.c_str());
-                                auth = BAD;
+                            auth = BAD;
                         }
                         else if(new_public_key == public_key && new_modulus == public_key_modulus) {
                             auth = GOOD;
                             tprint("Password provided has been authenticated.\n");
     					}
+                        else {
+                            tprint("Password provided has not been authenticated.\n");
+                            auth = BAD;
+                        }
+
                         numUnauth--;
                     }
                     else if(clientMap.find(name) != clientMap.end() && clientMap.find(name)->second.auth == NONE) {
@@ -827,8 +842,9 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                             clientMap.find(name)->second.public_key_modulus = new_modulus;
                             clientMap.find(name)->second.public_key = new_public_key;
                             clientMap.find(name)->second.auth = GOOD;
-                            tprint("Password provided has been authenticated.\n");
+                            tprint("User %s has been authenticated.\n", name.c_str());
                         }
+
                         numUnauth--;
                     }
                     break;
@@ -959,6 +975,10 @@ void checkTCPConnections() {
                             uint64_t low32b = (uint32_t)sessionKey;
                             tprint("low32b %lu\n", low32b);
 
+                            clientMap.find(newClientName)->second.sessionKey = sessionKey;
+                            tprint("sessionkey is %lu\n", sessionKey);
+
+
                             // PublicEncryptDecrypt(low32b, P2PI_TRUST_E, P2PI_TRUST_N);
                             PublicEncryptDecrypt(low32b, findClientByFd(it->fd)->second.public_key, findClientByFd(it->fd)->second.public_key_modulus);
 
@@ -997,6 +1017,10 @@ void checkTCPConnections() {
 
                         tprint("ACCEPT_ENCRYPTED_COMM low32b %u\n", (uint32_t)low32b);
                         tprint("ACCEPT_ENCRYPTED_COMM high32b %u\n", (uint32_t)high32b);
+
+                        findClientByFd(it->fd)->second.sessionKey = (high32b << 32) + low32b;
+                        tprint("sessionkey is %lu\n", findClientByFd(it->fd)->second.sessionKey);
+
                     }
                     break;
                 }
@@ -1188,7 +1212,14 @@ void checkTCPConnections() {
 				case ENCRYPTED_DATA_CHUNK_MESSAGE: {
                     tprint("ENCRYPTED_DATA_CHUNK_MESSAGE\n");
 
-					break;
+                    uint8_t encryptedDataChunk[64];
+                    if(read(it->fd, encryptedDataChunk, 64) < 0)
+                        die("Failed to read encryptedDataChunk");
+
+                    int newType = processEncryptedDataChunk(findClientByFd(it->fd)->second, encryptedDataChunk);
+
+                    tprint("new type is %lx\n", newType);
+                    break;
 				}
                 default: {
                     fprintf(stderr, "\nINVALID MESSAGE: type %lx\n", type);
@@ -1566,11 +1597,11 @@ void writeEncryptedDataChunk(struct Client clientInfo, uint8_t* raw_message, uin
 }
 
 //return decrypted Type
-int proccessEncryptedDataChunk(struct Client clientInfo, uint8_t* encryptedDataChunk)
+int processEncryptedDataChunk(struct Client clientInfo, uint8_t* encryptedDataChunk)
 {
-    PrivateEncryptDecrypt(encryptedDataChunk + 6, 64, clientInfo.seqNum - 1);
-    clientInfo.seqNum--;
-    int type = getType(encryptedDataChunk+2); //"P2PI0x000D(TYPE)";
+    PrivateEncryptDecrypt(encryptedDataChunk + 6, 64, clientInfo.sessionKey);
+    // clientInfo.seqNum--;
+    int type = getType(encryptedDataChunk + 2); //"P2PI0x000D(TYPE)";
     int newType = 0;
     switch(type) //translates messageType
     {
@@ -1671,7 +1702,7 @@ uint64_t bitswap(uint64_t val)
 
 
 void sendReqAuthMessage(std::string name) {
-    tprint("sending auth discovery\n");
+    tprint("Sending auth request for %s\n", name.c_str());
     // Send request authenicated key message
 
     int reqAuthMsgLen = 14 + name.length() + 1;

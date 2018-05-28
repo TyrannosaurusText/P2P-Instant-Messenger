@@ -91,7 +91,7 @@ uint64_t htonll(uint64_t val);
 uint64_t ntohll(uint64_t lav);
 uint64_t bitswap(uint64_t lav);
 void writeEncryptedDataChunk(struct Client clientInfo, uint8_t* raw_message, uint32_t messageLength );
-int proccessEncryptedDataChunk(struct Client clientInfo, uint8_t* encryptedDataChunk);
+int processEncryptedDataChunk(struct Client clientInfo, uint8_t* encryptedDataChunk);
 int getTarget(std::string &target);
 void sendReqAuthMessage(std::string name);
 void checkAuth();
