@@ -1636,15 +1636,9 @@ void login_prompt()
     }
 }
 uint64_t htonll(uint64_t val){
-	val = bitswap(val);
-	return ((uint64_t)(htonl(val>>32))<<32) + (uint64_t)htonl((val));
+	
+	return (uint64_t)(htonl(val>>32)) + ((uint64_t)htonl(val)<<32);
 }
 uint64_t ntohll(uint64_t lav){
-	lav = bitswap(lav);
-	return ((uint64_t)(ntohl(lav>>32))<<32) + (uint64_t)ntohl((lav));
-}
-
-uint64_t bitswap(uint64_t val)
-{
-	return (val>>32) + (val<<32);
+	return (uint64_t)(htonl(lav>>32)) + ((uint64_t)htonl(lav)<<32);
 }
