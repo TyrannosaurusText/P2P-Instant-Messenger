@@ -139,68 +139,13 @@ int main(int argc, char** argv) {
 
                 sendUDPMessage(DISCOVERY);
                 currTimeout = baseTimeout;
-
-                if(auth == NONE) {
-                    tprint("sending auth discovery\n");
-                    // Send request authenicated key message
-                
-                    int reqAuthMsgLen = 14 + username.length() + 1;
-
-                    memset(reqAuthMsg, 0, 46);
-                    memcpy(reqAuthMsg, "P2PI", 4);
-                    *((uint16_t*)(reqAuthMsg + 4)) = htons(REQUEST_AUTH_KEY);
-
-                    // Generating random
-                    uint32_t secretNum = GenerateRandomValue();
-
-                    while(secretNum == 0)
-                        secretNum = GenerateRandomValue();
-                    
-                    uint64_t secretData = secretNum;
-                    // TODO: secretNum is a 32bit value, but the 1st parameter of PublicEncryptDecrypt
-                    // should be a 64bit value, double check if not work
-                    tprint("Secret: %lu\n", secretData);
-                    PublicEncryptDecrypt(secretData, P2PI_TRUST_E, P2PI_TRUST_N);
-                    tprint("encrypted Secret: %lu\n",secretData);
-                    
-                    *((uint64_t*)(reqAuthMsg + 6)) =  htonll(secretData);
-					tprint("val manual: %lu\n", *((uint64_t*)(reqAuthMsg + 6)));
-                    tprint("val htonll: %lu\n", htonll(secretData));
-                    memcpy(reqAuthMsg + 14, username.c_str(), username.length());
-                    
-                    
-                    
-                    // Do actually sending
-                    // if there is a trust anchor specified
-                    if(!taVector.empty()) {
-                        tprint("Unicasting\n");
-
-                        struct sockaddr_in taAddr = *taVector.begin();
-                        if(sendto(udpSockFd, reqAuthMsg, reqAuthMsgLen, 0, (struct sockaddr*)&taAddr, sizeof(*taVector.begin())) < 0) {
-                            die("Failed to unicast trust anchor discovery");
-                        }
-                    }
-                    // else, broadcast
-                    else {
-                        tprint("sending auth discovery\n");
-                        // change dest port to trust anchor udp port
-                        udpServerAddr.sin_port = htons(taUDPPort);
-                        udpServerAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
-
-                        if(sendto(udpSockFd, reqAuthMsg, reqAuthMsgLen, 0, (struct sockaddr*)&udpServerAddr, sizeof(udpServerAddr)) < 0) {
-                            die("Failed to broadcast trust anchor discovery");
-                        }
-
-                        // reset dest port
-                        udpServerAddr.sin_port = htons(udpPort);
-                    }
-
-                
-                }
-
             }
             else
                 currTimeout = -1;
+
+            // if(auth == NONE) {
+            //     sendReqAuthMessage(username);
+            // }
         }
 
         clearline();
@@ -831,6 +776,14 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     // tprint("inc auth:\n")
 
                     tprint("Found authority host %s\n", gethostbyaddr((void*)(&udpClientAddr.sin_addr), udpClientAddrLen, AF_INET)->h_name);
+
+                    int found = 0;
+                    for(auto v : taVector)
+                        if(v.sin_addr.s_addr == udpClientAddr.sin_addr.s_addr)
+                            found = 1;
+                        
+                    if(found == 0)
+                        taVector.push_back(udpClientAddr);
 
                     uint64_t secretNum = ntohll((*(uint64_t*)(incomingUDPMsg + 6)));
 
@@ -1692,4 +1645,73 @@ uint64_t ntohll(uint64_t lav){
 uint64_t bitswap(uint64_t val)
 {
 	return (val>>32) + (val<<32);
+}
+
+
+void sendReqAuthMessage(std::string name) {
+    tprint("sending auth discovery\n");
+    // Send request authenicated key message
+
+    int reqAuthMsgLen = 14 + name.length() + 1;
+
+    memset(reqAuthMsg, 0, 46);
+    memcpy(reqAuthMsg, "P2PI", 4);
+    *((uint16_t*)(reqAuthMsg + 4)) = htons(REQUEST_AUTH_KEY);
+
+    // Generating random
+    uint32_t secretNum = GenerateRandomValue();
+
+    while(secretNum == 0)
+        secretNum = GenerateRandomValue();
+    
+    uint64_t secretData = secretNum;
+    // TODO: secretNum is a 32bit value, but the 1st parameter of PublicEncryptDecrypt
+    // should be a 64bit value, double check if not work
+    tprint("Secret: %lu\n", secretData);
+    PublicEncryptDecrypt(secretData, P2PI_TRUST_E, P2PI_TRUST_N);
+    tprint("encrypted Secret: %lu\n",secretData);
+    
+    *((uint64_t*)(reqAuthMsg + 6)) =  htonll(secretData);
+    tprint("val manual: %lu\n", *((uint64_t*)(reqAuthMsg + 6)));
+    tprint("val htonll: %lu\n", htonll(secretData));
+    memcpy(reqAuthMsg + 14, name.c_str(), name.length());
+    
+    
+    
+    // Do actually sending
+    // if there is a trust anchor specified
+    if(!taVector.empty()) {
+        tprint("Unicasting\n");
+
+        struct sockaddr_in taAddr = *taVector.begin();
+        if(sendto(udpSockFd, reqAuthMsg, reqAuthMsgLen, 0, (struct sockaddr*)&taAddr, sizeof(*taVector.begin())) < 0) {
+            die("Failed to unicast trust anchor discovery");
+        }
+    }
+    // else, broadcast
+    else {
+        tprint("sending auth discovery\n");
+        // change dest port to trust anchor udp port
+        udpServerAddr.sin_port = htons(taUDPPort);
+        udpServerAddr.sin_addr.s_addr = htonl(INADDR_BROADCAST);
+
+        if(sendto(udpSockFd, reqAuthMsg, reqAuthMsgLen, 0, (struct sockaddr*)&udpServerAddr, sizeof(udpServerAddr)) < 0) {
+            die("Failed to broadcast trust anchor discovery");
+        }
+
+        // reset dest port
+        udpServerAddr.sin_port = htons(udpPort);
+    }
+}
+
+
+void checkAuth() {
+    if(auth == NONE)
+        sendReqAuthMessage(username);
+
+    for(auto i : clientMap) {
+        if(i.second.auth == NONE) {
+            sendReqAuthMessage(i.second.username);
+        }
+    }
 }
