@@ -1471,8 +1471,13 @@ void checkTCPConnections() {
                             for(auto a : clientMap) {
                                 dprint("User listing: %s\n", a.second.username.c_str());
                             }
-                            if(findClientByFd(it->fd) != clientMap.end())
+                            if(findClientByFd(it->fd) != clientMap.end()) {
                                 findClientByFd(it->fd)->second.tcpSockFd = -1;
+
+                                if(findClientByFd(it->fd)->second.closed) 
+                                    clientMap.erase(findClientByFd(it->fd));
+                            }
+                            
                             tcpConnMap.erase(tcpConnMap.find(it->fd));
 
                             if(it->fd == currentConnection) {
