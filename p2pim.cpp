@@ -90,6 +90,7 @@ std::vector<struct sockaddr_in> taVector;
 uint8_t reqAuthMsg[46];
 int numUnauth = 1;
 
+uint8_t dummy[6] = {0,0,0,0,16,16};
 
 std::unordered_map<std::string, struct Client>::iterator findClientByFd(int fd);
 
@@ -154,7 +155,7 @@ int main(int argc, char** argv) {
                 currTimeout = -1;
             }
         }
-
+		
         clearline();
         std::string connName;
         if(tcpConnMap.find(currentConnection) == tcpConnMap.end())
@@ -178,6 +179,17 @@ int main(int argc, char** argv) {
         timePassed = ((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec) / 1000;
         currTimeout -= timePassed;
 
+		for(auto it: clientMap)
+		{
+			auto client = it.second;
+			if(client.tcpSockFd != -1 && client.connectionType == 1)
+			{
+				if(GenerateRandomValue()%10000 < 200){
+				tprint("sending dummy to tcp sock %d\n", client.tcpSockFd);
+				writeEncryptedDataChunk(client, dummy, 6);
+				}
+			}
+		}
 
         // Timeout event
         if(0 == rc) {
@@ -689,8 +701,14 @@ void sendTCPMessage(int type, int fd) {
     memcpy(outgoingTCPMsg, "P2PI", 4);
     *((uint16_t*)(outgoingTCPMsg + 4)) = htons(type);
 
-    if(write(fd, outgoingTCPMsg, 6) < 0)
-        die("Failed to send TCP message");
+	if(findClientByFd(fd)->second.connectionType != 1)
+	{
+		if(write(fd, outgoingTCPMsg, 6) < 0)
+			die("Failed to send TCP message");
+	}
+	else{
+		writeEncryptedDataChunk(findClientByFd(fd)->second, outgoingTCPMsg, 6);
+	}
 }
 
 void checkTCPPort(std::string newClientName) {
@@ -1552,10 +1570,15 @@ void checkSTDIN() {
                                 memcpy(outgoingTCPMsg, "P2PI", 4);
                                 *((uint16_t*)(outgoingTCPMsg + 4)) = htons(DISCONTINUE_COMM);
 
-                                if(write(currentConnection, outgoingTCPMsg, 6) < 0){
-                                    die("Failed to send TCP message.");
-                                    break;
-                                }
+								if(findClientByFd(currentConnection)->second.connectionType != 1){
+									if(write(currentConnection, outgoingTCPMsg, 6) < 0){
+										die("Failed to send TCP message.");
+										break;
+									}
+								}
+								else{
+									writeEncryptedDataChunk(findClientByFd(currentConnection)->second, outgoingUDPMsg, 6);
+								}
                                 if(tcpConnMap.find(currentConnection) != tcpConnMap.end()) {
                                     std::string connName = tcpConnMap.find(currentConnection)->second;
                                     close(clientMap.find(connName)->second.tcpSockFd);
@@ -1640,9 +1663,16 @@ void checkSTDIN() {
                                 memcpy(outgoingTCPMsg, "P2PI", 4);
                                 *((uint16_t*)(outgoingTCPMsg + 4)) = htons(DISCONTINUE_COMM);
 
-                                if(client->second.tcpSockFd != -1 && write(client->second.tcpSockFd, outgoingTCPMsg, 6) < 0){
+                                
+								
+								if(client->second.connectionType != 1){
+									if(client->second.tcpSockFd != -1 && write(client->second.tcpSockFd, outgoingTCPMsg, 6) < 0){
                                     die("Failed to send TCP message");
                                 }
+								}
+								else{
+									writeEncryptedDataChunk(client->second, outgoingUDPMsg, 6);
+								}
 
                                 client->second.block = 1;
 
