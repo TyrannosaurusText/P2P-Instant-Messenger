@@ -28,6 +28,7 @@ struct Client {
 	uint64_t which = 2; //increments on send(0) or decrement on send(1)
     uint64_t public_key = 0;
     uint64_t public_key_modulus = 0;
+    int closed = 0;
     // uint64_t sessionKey = 0;
 };
 
@@ -90,7 +91,8 @@ std::vector<struct sockaddr_in> taVector;
 uint8_t reqAuthMsg[46];
 int numUnauth = 1;
 
-uint8_t dummy[6] = {0,0,0,0,15,15};
+
+uint8_t dummy[6] = {'P','2','P','I',15,15};
 
 std::unordered_map<std::string, struct Client>::iterator findClientByFd(int fd);
 
@@ -179,15 +181,16 @@ int main(int argc, char** argv) {
         timePassed = ((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec) / 1000;
         currTimeout -= timePassed;
 
-		for(auto it: clientMap)
+		for(auto it: tcpConnMap)
 		{
-			auto client = it.second;
-			if(client.tcpSockFd != -1 && client.connectionType == 1)
+			auto fd = it.first;
+			
+			if(findClientByFd(fd)->second.connectionType == 1)
 			{
-				// if(GenerateRandomValue() % 10000 < 200){
-				//     tprint("sending dummy to tcp sock %d\n", client.tcpSockFd);
-				//     writeEncryptedDataChunk(client, dummy, 6);
-				// }
+				if(GenerateRandomValue() % 10000 < 200){
+				    tprint("sending dummy to tcp sock %d\n", findClientByFd(fd)->second);
+				    writeEncryptedDataChunk(findClientByFd(fd)->second, dummy, 6);
+				}
 			}
 		}
 
@@ -375,6 +378,7 @@ void SIGINT_handler(int signum) {
                 close(it.second.tcpSockFd);
             }
         }
+
         // Broadcast closing datagram
         sendUDPMessage(CLOSING);
         close(tcpSockFd);
@@ -796,7 +800,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                         if(it->second.tcpSockFd == currentConnection)
                             currentConnection = -1;
 
-                        clientMap.erase(it);
+                        it->second.closed = 1;
                     }
                     // If no more host is available, go back to discovery
                     if(clientMap.empty()) {
@@ -972,6 +976,7 @@ void checkTCPConnections() {
                     if(away == 1 || clientMap.find(newClientName)->second.block) {
                         // Send user unavailable message
                         *((uint16_t*)(ECM + 4)) = htons(USER_UNAVALIBLE);
+						
                         if(write(it->fd, ECM, 6) < 0) {
                             die("Failed to establish TCP connection.");
                         }
@@ -1229,8 +1234,12 @@ void checkTCPConnections() {
                     for(auto a : clientMap) {
                         dprint("User listing: %s\n", a.second.username.c_str());
                     }
-                    if(findClientByFd(it->fd) != clientMap.end())
+                    if(findClientByFd(it->fd) != clientMap.end()) {
                         findClientByFd(it->fd)->second.tcpSockFd = -1;
+
+                        if(findClientByFd(it->fd)->second.closed) 
+                            clientMap.erase(findClientByFd(it->fd));
+                    }
                     tcpConnMap.erase(tcpConnMap.find(it->fd));
 
                     if(it->fd == currentConnection) {
@@ -1239,6 +1248,7 @@ void checkTCPConnections() {
 
                     close(it->fd);
                     it = pollFd.erase(it);
+
                     continue;
                 }
 				case ENCRYPTED_DATA_CHUNK_MESSAGE: {
@@ -1502,10 +1512,8 @@ void checkSTDIN() {
                 if(commandMap.find(firstWord) != commandMap.end()) {
                     switch(commandMap[firstWord]) {
                         case CONNECT: {
-                            away = 0;
-
-                            std::string target;
-                            if(-1 == getTarget(target))
+                           std::string target;
+                            if(-1==getTarget(target))
                             {
                                 tprint("No users specified.\n");
                                 break;
@@ -1602,17 +1610,6 @@ void checkSTDIN() {
 
                         case AWAY: {
                             for(auto c: tcpConnMap) {
-                                // uint8_t outgoingTCPMsg[6];
-                                // memcpy(outgoingTCPMsg, "P2PI", 4);
-                                // *((uint16_t*)(outgoingTCPMsg + 4)) = htons(USER_UNAVALIBLE);
-
-                                // if(findClientByFd(currentConnection)->second.connectionType != 1) {
-                                //     if(write(c.first, outgoingTCPMsg, 6) < 0) {
-                                //         die("Failed to send away message.\n");
-                                //     }
-                                // }
-                                // else
-                                //     writeEncryptedDataChunk(findClientByFd(currentConnection)->second, outgoingTCPMsg, 6);
                                 sendTCPMessage(USER_UNAVALIBLE, c.first);
 
                                 clientMap.find(c.second)->second.tcpSockFd = -1;
@@ -1812,18 +1809,6 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
     *((uint16_t*)(encryptedDataChunk + 6)) = ntohs(newType); 
     uint8_t bytesSent = 0;
 	uint64_t seqNum;
-	// if(newType == DUMMY_E)
- //    {
-	// 	// seqNum = sessionKeyUpdate(clientInfo, SENDER);
-	// 	uint64_t dummymsg = GenerateRandomValue();
- //        memcpy(encryptedDataChunk+8, &dummymsg, 62);
- //        PrivateEncryptDecrypt(encryptedDataChunk + 6, 62, seqNum);
- //        if(0 > write(clientInfo.tcpSockFd, encryptedDataChunk, 70))
- //        {
- //            die("failed to send encrypted message");
- //        }
- //        return;
- //    }
     while(messageLength > bytesSent) //max length encryted message is 62.
     {   
 		seqNum = sessionKeyUpdate(clientInfo, SENDER);
