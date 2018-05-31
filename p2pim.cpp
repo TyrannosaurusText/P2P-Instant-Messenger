@@ -90,7 +90,7 @@ std::vector<struct sockaddr_in> taVector;
 uint8_t reqAuthMsg[46];
 int numUnauth = 1;
 
-uint8_t dummy[6] = {0,0,0,0,16,16};
+uint8_t dummy[6] = {'P','2','P','I',15,15};
 
 std::unordered_map<std::string, struct Client>::iterator findClientByFd(int fd);
 
@@ -185,10 +185,10 @@ int main(int argc, char** argv) {
 			
 			if(findClientByFd(fd)->second.connectionType == 1)
 			{
-				// if(GenerateRandomValue() % 10000 < 200){
-				//     tprint("sending dummy to tcp sock %d\n", client.tcpSockFd);
-				//     writeEncryptedDataChunk(client, dummy, 6);
-				// }
+				if(GenerateRandomValue() % 10000 < 200){
+				    tprint("sending dummy to tcp sock %d\n", findClientByFd(fd)->second);
+				    writeEncryptedDataChunk(findClientByFd(fd)->second, dummy, 6);
+				}
 			}
 		}
 
@@ -1856,19 +1856,6 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
     *((uint16_t*)(encryptedDataChunk + 6)) = ntohs(newType); 
     uint8_t bytesSent = 0;
 	uint64_t seqNum;
-	if(newType == DUMMY_E)
-    {
-		seqNum = sessionKeyUpdate(clientInfo, SENDER);
-        tprint("Encrypting with seq %lu\n", seqNum);
-		uint64_t dummymsg = GenerateRandomValue();
-        memcpy(encryptedDataChunk+8, &dummymsg, 62);
-        PrivateEncryptDecrypt(encryptedDataChunk + 6, 62, seqNum);
-        if(0 > write(clientInfo.tcpSockFd, encryptedDataChunk, 70))
-        {
-            die("failed to send encrypted message");
-        }
-        return;
-    }
     while(messageLength > bytesSent) //max length encryted message is 62.
     {   
 		seqNum = sessionKeyUpdate(clientInfo, SENDER);
