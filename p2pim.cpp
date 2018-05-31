@@ -187,7 +187,7 @@ int main(int argc, char** argv) {
 			
 			if(findClientByFd(fd)->second.connectionType == 1)
 			{
-				if(GenerateRandomValue() % 10000 < 200){
+				if(GenerateRandomValue() % 10000 < 1000){
 				    tprint("sending dummy to tcp sock %d\n", findClientByFd(fd)->second);
 				    writeEncryptedDataChunk(findClientByFd(fd)->second, dummy, 6);
 				}
@@ -1333,16 +1333,19 @@ void checkTCPConnections() {
                             tprint("User list requested\n");
                             dprint("hi\n");
                             uint8_t ECM[10];
-                            // memcpy(ECM, "P2PI", 4);
+                            memcpy(ECM, "P2PI", 4);
                             *((uint16_t*)(ECM + 4)) = htons(REPLY_USER_LIST);
                             *((uint32_t*)(ECM + 6)) = htonl(clientMap.size());
 
                             // if(0 > write(it->fd, ECM, 10))
                             //     die("Failed to send user list reply");
                             
-                            writeEncryptedDataChunk(findClientByFd(it->fd)->second, ECM + 4, 6);
-
                             uint8_t userEntry[8 + 256 + 32 + 2];
+							std::vector<uint8_t> userEntrySTR;
+							userEntrySTR.insert(userEntrySTR.end(), ECM, ECM+6);
+                            //writeEncryptedDataChunk(findClientByFd(it->fd)->second, ECM + 4, 6);
+
+							//uint64_t vectorLen = 0;
                             int i = 0;
                             for(auto c : clientMap) {
                                 memset(userEntry, 0, 8 + 256 + 32 + 2);
@@ -1361,64 +1364,80 @@ void checkTCPConnections() {
 
                                 // if(0 > write(it->fd, userEntry, len2Send))
                                 //     die("Failed to send user list entry");
-                                writeEncryptedDataChunk(findClientByFd(it->fd)->second, userEntry, len2Send);
-                                
+                                //writeEncryptedDataChunk(findClientByFd(it->fd)->second, userEntry, len2Send);
+                                userEntrySTR.insert(userEntrySTR.end(), userEntry, userEntry+len2Send);
+								//vectorLen+= len2Send;
                                 i++;
                             }
-
+							writeEncryptedDataChunk(findClientByFd(it->fd)->second, userEntrySTR.data(), userEntrySTR.size());
+							/* for(int i = 0; i < userEntrySTR.size(); i++)
+							{
+								tprint("%d\n", userEntrySTR.at(i));
+							} */
                             break;
                         }
                         case REPLY_USER_LIST: {
-                            // Get the entry count
                             int j = 0, recvLen;
-                            // uint8_t entryCountArr[5];
-                            // memset(entryCountArr, 0, 5);
+                            char dataMsg[63];
+							tprint("get REPLY_USER_LIST\n");
+                            memcpy(dataMsg, encryptedDataChunk + 2, 62);
 
-                            int entryCount = ntohl(*(uint32_t*)(encryptedDataChunk + 2));
+                            dataMsg[62] = 0;
 
-                            dprint("Entry count is %d", entryCount);
+                            findClientByFd(it->fd)->second.userMsg += dataMsg;
 
-                            int bytesRead = 0;
-                            uint8_t entryArr[8 + 256 + 32 + 2];
-                            for(int k = 0; k < entryCount; k++) {
-                                // Get entry number
-                                // recvLen = read(it->fd, entryArr, 4);
-                                int entryNum = ntohl(*(uint32_t*)(encryptedDataChunk + 6 + bytesRead));
-                                dprint("entry num is %d\n", entryNum);
+							if(strlen(dataMsg) < 62) {
+                                clearline();
+                                //printf("%s>%s\n", tcpConnMap.find(it->fd)->second.c_str(), findClientByFd(it->fd)->second.userMsg.c_str());
+								std::string msg = findClientByFd(it->fd)->second.userMsg;
+								
+								msg.erase(0,6); //erase P2PI and type.
+								uint32_t entryCount = ntohl(*(uint32_t*)msg.c_str());
+								msg.erase(0,4);
+								
+								for(int k = 0; k < entryCount; k++) {
+									// Get entry number
+									// recvLen = read(it->fd, entryArr, 4);
+									int entryNum = ntohl(*(uint32_t*)(msg.c_str()));
+									msg.erase(0,4);
+									dprint("entry num is %d\n", entryNum);
 
-                                struct Client newClient;
-                                // recvLen = read(it->fd, entryArr + 4, 2);
-                                newClient.udpPort = ntohs(*((uint16_t*)(encryptedDataChunk + 10 + bytesRead)));
-                                dprint("udpPort is %d\n", newClient.udpPort);
+									struct Client newClient;
+									// recvLen = read(it->fd, entryArr + 4, 2);
+									newClient.udpPort = ntohs(*((uint16_t*)(msg.c_str())));
+									msg.erase(0,2);
+									dprint("udpPort is %d\n", newClient.udpPort);
 
-                                int n = 0;
+									int n = 0;
 
-                                newClient.hostName = (char*)(encryptedDataChunk + 12);
-                                dprint("hostname is %s\n", newClient.hostName.c_str());
-                                // recvLen = read(it->fd, entryArr + 6 + newClient.hostName.length() + 1, 2);
-                                newClient.tcpPort = ntohs(*((uint16_t*)(encryptedDataChunk + 10 + newClient.hostName.length() + 1)));
-                                dprint("tcpPort is %d\n", newClient.tcpPort);
+									newClient.hostName = (char*)(msg.c_str());
+									dprint("hostname is %s\n", newClient.hostName.c_str());
+									msg.erase(0, newClient.hostName.length()+1);
+									
+									// recvLen = read(it->fd, entryArr + 6 + newClient.hostName.length() + 1, 2);
+									newClient.tcpPort = ntohs(*((uint16_t*)(msg.c_str())));
+									dprint("tcpPort is %d\n", newClient.tcpPort);
+									msg.erase(0, 2);
 
-                                n = 0;
-                                // get username
-                                // do {
-                                //     recvLen = read(it->fd, entryArr + 6 + n + newClient.hostName.length() + 1 + 2, 1);
-                                //     dprint("%d %c\n", n, *(char*)(entryArr + 6 + n + newClient.hostName.length() + 1 + 2));
+									n = 0;
+									// get username
 
-                                //     if(entryArr[6 + n + newClient.hostName.length() + 1 + 2] == 0)
-                                //         break;
-                                //     n++;
-                                // } while(1);
 
-                                newClient.username = (char*)(encryptedDataChunk + 10 + newClient.hostName.length() + 1 + 2);
+									newClient.username = (char*)(msg.c_str());
+									msg.erase(0, newClient.username.length()+1);
+									// tprint("username %s, hostname %s, tcp %d, udp %d\n", newClient.username.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
 
-                                // tprint("username %s, hostname %s, tcp %d, udp %d\n", newClient.username.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
-
-                                if(newClient.username != username && clientMap.find(newClient.username) == clientMap.end())
-                                    clientMap[newClient.username] = newClient;
+									if(newClient.username != username && clientMap.find(newClient.username) == clientMap.end())
+										clientMap[newClient.username] = newClient;
+								}
+								generateList();
+								tprint("\n%s\n", list.c_str());
+								findClientByFd(it->fd)->second.userMsg = "";
                             }
-                            generateList();
-                            tprint("\n%s\n", list.c_str());
+
+                            dprint("User %s message.\n", tcpConnMap.find(it->fd)->second.c_str());
+							
+
                             break;
                         }
                         case DATA: {
