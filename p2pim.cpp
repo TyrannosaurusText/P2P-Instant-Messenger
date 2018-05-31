@@ -90,7 +90,7 @@ std::vector<struct sockaddr_in> taVector;
 uint8_t reqAuthMsg[46];
 int numUnauth = 1;
 
-uint8_t dummy[6] = {0,0,0,0,16,16};
+uint8_t dummy[6] = {0,0,0,0,15,15};
 
 std::unordered_map<std::string, struct Client>::iterator findClientByFd(int fd);
 
@@ -1513,10 +1513,7 @@ void checkSTDIN() {
                             tprint("Looking for user: %s\n", target.c_str());
                             auto client = clientMap.find(target);
                             if( client != clientMap.end() ) {
-                                if(client->second.block) {
-                                    tprint("User is blocked, unblock to connect.\n")
-                                    break;
-                                }
+                                client->second.block = 0;
                                 if(client->second.tcpSockFd == -1) {
                                     connectToClient(target);
                                     currentConnection = client->second.tcpSockFd;
@@ -1533,17 +1530,7 @@ void checkSTDIN() {
                         }
                         case GETLIST: {
                             if(currentConnection != -1) {
-                                uint8_t outgoingTCPMsg[6];  //max length data is 512
-                                bzero(outgoingTCPMsg, 6);
-                                uint16_t type = htons(REQUEST_USER_LIST);
-                                memcpy(outgoingTCPMsg, "P2PI", 4);
-                                memcpy(outgoingTCPMsg + 4, &type, 2);
-
-                                 //target is the fd that the client wishes to speak to.
-                                if(write(currentConnection, outgoingTCPMsg, 6) < 0){
-                                    die("Failed to establish send data.\n");
-                                    break;
-                                }
+                                sendTCPMessage(REQUEST_USER_LIST, currentConnection);
                             }
                             else
                                 tprint("No connection.\n");
@@ -1567,20 +1554,8 @@ void checkSTDIN() {
                         case DISCONNECT: {
                             if(currentConnection != -1){
                                 tprint("Closing connection with %s\n", tcpConnMap.find(currentConnection)->second.c_str());
-
-                                uint8_t outgoingTCPMsg[6];
-                                memcpy(outgoingTCPMsg, "P2PI", 4);
-                                *((uint16_t*)(outgoingTCPMsg + 4)) = htons(DISCONTINUE_COMM);
-
-								if(findClientByFd(currentConnection)->second.connectionType != 1){
-									if(write(currentConnection, outgoingTCPMsg, 6) < 0){
-										die("Failed to send TCP message.");
-									}
-								}
-								else{
-                                    tprint("Type should be %u\n", getType(outgoingTCPMsg));
-									writeEncryptedDataChunk(findClientByFd(currentConnection)->second, outgoingUDPMsg, 6);
-								}
+                                sendTCPMessage(DISCONTINUE_COMM, currentConnection);
+                                
                                 if(tcpConnMap.find(currentConnection) != tcpConnMap.end()) {
                                     std::string connName = tcpConnMap.find(currentConnection)->second;
                                     close(clientMap.find(connName)->second.tcpSockFd);
@@ -1627,17 +1602,18 @@ void checkSTDIN() {
 
                         case AWAY: {
                             for(auto c: tcpConnMap) {
-                                uint8_t outgoingTCPMsg[6];
-                                memcpy(outgoingTCPMsg, "P2PI", 4);
-                                *((uint16_t*)(outgoingTCPMsg + 4)) = htons(USER_UNAVALIBLE);
+                                // uint8_t outgoingTCPMsg[6];
+                                // memcpy(outgoingTCPMsg, "P2PI", 4);
+                                // *((uint16_t*)(outgoingTCPMsg + 4)) = htons(USER_UNAVALIBLE);
 
-                                if(findClientByFd(currentConnection)->second.connectionType != 1) {
-                                    if(write(c.first, outgoingTCPMsg, 6) < 0) {
-                                        die("Failed to send away message.\n");
-                                    }
-                                }
-                                else
-                                    writeEncryptedDataChunk(findClientByFd(currentConnection)->second, outgoingTCPMsg, 6);
+                                // if(findClientByFd(currentConnection)->second.connectionType != 1) {
+                                //     if(write(c.first, outgoingTCPMsg, 6) < 0) {
+                                //         die("Failed to send away message.\n");
+                                //     }
+                                // }
+                                // else
+                                //     writeEncryptedDataChunk(findClientByFd(currentConnection)->second, outgoingTCPMsg, 6);
+                                sendTCPMessage(USER_UNAVALIBLE, c.first);
 
                                 clientMap.find(c.second)->second.tcpSockFd = -1;
                             }
@@ -1665,20 +1641,8 @@ void checkSTDIN() {
                             // Find user
                             auto client = clientMap.find(target);
                             if(client != clientMap.end()) {
-                                uint8_t outgoingTCPMsg[6];
-                                memcpy(outgoingTCPMsg, "P2PI", 4);
-                                *((uint16_t*)(outgoingTCPMsg + 4)) = htons(DISCONTINUE_COMM);
-
-                                
-								
-								if(client->second.connectionType != 1){
-									if(client->second.tcpSockFd != -1 && write(client->second.tcpSockFd, outgoingTCPMsg, 6) < 0){
-                                    die("Failed to send TCP message");
-                                }
-								}
-								else{
-									writeEncryptedDataChunk(client->second, outgoingUDPMsg, 6);
-								}
+                                if(client->second.tcpSockFd != -1)
+                                    sendTCPMessage(DISCONTINUE_COMM, client->second.tcpSockFd);
 
                                 client->second.block = 1;
 
