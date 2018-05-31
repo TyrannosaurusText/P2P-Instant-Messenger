@@ -61,6 +61,9 @@
 #define udpFDPOLL 1
 #define tcpFDPOLL 2
 
+#define SENDER 1
+#define RECEIVER 0
+
 void ResetCanonicalMode(int fd, struct termios *savedattributes);
 void SetNonCanonicalMode(int fd, struct termios *savedattributes);
 void optionError(char** argv, const char* optErr);
@@ -95,3 +98,4 @@ int processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encryptedDataC
 int getTarget(std::string &target);
 void sendReqAuthMessage(std::string name);
 void checkAuth();
+uint64_t sessionKeyUpdate(struct Client& clientInfo, int SendorRecv);

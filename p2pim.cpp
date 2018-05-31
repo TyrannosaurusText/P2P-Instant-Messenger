@@ -22,8 +22,10 @@ struct Client {
     std::string userMsg = "";
     int auth = NONE;
     int connectionType = 0; //1 for encrypted session
-    uint64_t sessionID = 0;
-    uint64_t seqNum = 0;
+    uint64_t sessionKey = 0;
+    uint64_t RXCount = 0; //substractBy
+    uint64_t TXCount = 0; //AddBy
+	uint64_t which = 2; //increments on send(0) or decrement on send(1)
     uint64_t public_key = 0;
     uint64_t public_key_modulus = 0;
     // uint64_t sessionKey = 0;
@@ -606,12 +608,15 @@ void connectToClient(std::string clientName) {
 			*((uint64_t*)(ECM + 6 + username.length() + 1)) = htonll(public_key);			
 			*((uint64_t*)(ECM + 6 + username.length() + 1 + 8)) = htonll(public_key_modulus);
             clientMap.find(clientName)->second.connectionType = 1;
+			clientMap.find(clientName)->second.which = SENDER;
+			
 		}
 		if(write(newConn, ECM, ECMLen) < 0)
 			die("Failed to send ESTABLISH COMM message.");
 	
         // Record the newly connected tcp socket
         clientMap.find(clientName)->second.tcpSockFd = newConn;
+		
         tcpConnMap[newConn] = clientName;
 
         // Push fd to pollfd vector
@@ -909,6 +914,10 @@ void checkTCPConnections() {
                         j++;
                     } while(1);
 
+
+                    // recvLen = read(it->fd, newClientNameArr, 32);
+
+                    std::string newClientName = newClientNameArr;
                     if(type == ESTABLISH_ENCRYPTED_COMM) {
                         if(read(it->fd, &client_public_key, 8) < 0)
                             die("Failed to read public key in ESTABLISH_ENCRYPTED_COMM");
@@ -917,15 +926,12 @@ void checkTCPConnections() {
 
                         client_public_key = ntohll((client_public_key));
                         client_public_key_modulus = ntohll((client_public_key_modulus));
-
+						clientMap.find(newClientName)->second.which = RECEIVER; 
                         tprint("ESTABLISH_ENCRYPTED_COMM\n");
                     }
                     else
                         tprint("establish\n");
-                    // recvLen = read(it->fd, newClientNameArr, 32);
-
-                    std::string newClientName = newClientNameArr;
-
+					
                     if(clientMap.find(newClientName) == clientMap.end()) {
                         // fprintf(stderr, "\n!!!!!UNKNOWN USER TRYING TO CONNECT!!!!!\n");
                         sendTCPMessage(USER_UNAVALIBLE, it->fd);
@@ -960,11 +966,13 @@ void checkTCPConnections() {
                     else {
                         // Send accept comm message
                         *((uint16_t*)(ECM + 4)) = type == ESTABLISH_COMM ? htons(ACCEPT_COMM) : htons(ACCEPT_ENCRYPTED_COMM);
+						tprint("New sock FD is: %d\n", it->fd);
                         clientMap.find(newClientName)->second.tcpSockFd = it->fd;
                         tcpConnMap[it->fd] = newClientName;
 
                         if(type == ESTABLISH_ENCRYPTED_COMM) {
                             tprint("ESTABLISH_ENCRYPTED_COMM\n");
+							findClientByFd(it->fd)->second.connectionType = 1;
                             uint64_t sessionKey = GenerateRandomValue();
 
                             // Extract high 32bit
@@ -977,7 +985,7 @@ void checkTCPConnections() {
                             uint64_t low32b = (uint32_t)sessionKey;
                             tprint("low32b %lu\n", low32b);
 
-                            clientMap.find(newClientName)->second.seqNum = sessionKey;
+                            clientMap.find(newClientName)->second.sessionKey = sessionKey;
                             tprint("sessionkey is %lu\n", sessionKey);
 
 
@@ -1020,8 +1028,8 @@ void checkTCPConnections() {
                         tprint("ACCEPT_ENCRYPTED_COMM low32b %u\n", (uint32_t)low32b);
                         tprint("ACCEPT_ENCRYPTED_COMM high32b %u\n", (uint32_t)high32b);
 
-                        findClientByFd(it->fd)->second.seqNum = (high32b << 32) + low32b;
-                        tprint("sessionkey is %lu\n", findClientByFd(it->fd)->second.seqNum);
+                        findClientByFd(it->fd)->second.sessionKey = (high32b << 32) + low32b;
+                        tprint("sessionkey is %lu\n", findClientByFd(it->fd)->second.sessionKey);
 
                     }
                     break;
@@ -1145,6 +1153,10 @@ void checkTCPConnections() {
                 }
                 case DATA: {
                     // Read in data
+					if(findClientByFd(it->fd)->second.connectionType == 1) 
+					{
+						tprint("WARNING: Sender sent unencrytped data, but expected encrypted message.\n");
+					}
                     int j = 0, recvLen;
                     std::string dataBuffer = "";
                     char dataMsg[513];
@@ -1217,7 +1229,7 @@ void checkTCPConnections() {
                     uint8_t encryptedDataChunk[64];
                     if(read(it->fd, encryptedDataChunk, 64) < 0)
                         die("Failed to read encryptedDataChunk");
-
+					tprint("New sock FD is: %d\n", it->fd);
                     int newType = processEncryptedDataChunk(findClientByFd(it->fd)->second, encryptedDataChunk);
 
                     tprint("new type is %lx\n", newType);
@@ -1728,7 +1740,7 @@ void sendDataMessage(std::string message){
     memcpy(outgoingTCPMsg + 6, message.c_str(), message.length());
 
     //currentConnection is the fd that the client wishes to speak to.
-    if(findClientByFd(currentConnection)->second.connectionType != 1) {
+    if(encryptMode == 0){//findClientByFd(currentConnection)->second.connectionType != 1) {
         if(write(currentConnection,outgoingTCPMsg, message.length() + 7) < 0)
             die("Failed to establish send data.");
     }
@@ -1775,7 +1787,7 @@ void clearline() {
     printf("\33[2K\r");
 }
 
-//converts unencrtyped message into chunks of encrypted messages and sends to client
+//converts unencrytped message into chunks of encrypted messages and sends to client
 void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, uint32_t messageLength)
 {
     int type = getType(raw_message);
@@ -1798,18 +1810,31 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
     *((uint16_t*)(encryptedDataChunk + 4)) = ntohs(ENCRYPTED_DATA_CHUNK_MESSAGE);
     *((uint16_t*)(encryptedDataChunk + 6)) = ntohs(newType); 
     uint8_t bytesSent = 0;
+	uint64_t seqNum;
+	if(newType == DUMMY_E)
+    {
+		seqNum = sessionKeyUpdate(clientInfo, SENDER);
+		uint64_t dummymsg = GenerateRandomValue();
+        memcpy(encryptedDataChunk+8, &dummymsg, 62);
+        PrivateEncryptDecrypt(encryptedDataChunk + 6, 62, seqNum);
+        if(0 > write(clientInfo.tcpSockFd, encryptedDataChunk, 70))
+        {
+            die("failed to send encrypted message");
+        }
+        return;
+    }
     while(messageLength > bytesSent) //max length encryted message is 62.
     {   
-        GenerateRandomString(encryptedDataChunk + 8, 62, clientInfo.seqNum + 1);
+		seqNum = sessionKeyUpdate(clientInfo, SENDER);
+        GenerateRandomString(encryptedDataChunk + 8, 62, seqNum);
         
         memcpy(encryptedDataChunk + 8, raw_message + 6 + bytesSent, 
             (62 < messageLength - 6 - bytesSent? 62 : messageLength - 6 - bytesSent));
         
         bytesSent += 62;
-        tprint("Encrypting with seq %lu\n", clientInfo.seqNum);
+        tprint("Encrypting with seq %lu\n", seqNum);
 
-        PrivateEncryptDecrypt(encryptedDataChunk + 6, 64, clientInfo.seqNum);
-        clientInfo.seqNum++;
+        PrivateEncryptDecrypt(encryptedDataChunk + 6, 64, seqNum);
         // for(int i = 0; i < 70; i++) {
         //     tprint("%d\t%c\t%lx\n", encryptedDataChunk[i], encryptedDataChunk[i]);
         // }
@@ -1823,9 +1848,10 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
 //return decrypted Type
 int processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encryptedDataChunk)
 {
-    tprint("Decrypting with seq %lu\n", clientInfo.seqNum);
-    PrivateEncryptDecrypt(encryptedDataChunk, 64, clientInfo.seqNum);
-    clientInfo.seqNum--;
+	tprint("session key is: %lu\n", clientInfo.sessionKey); 
+	uint64_t seqNum = sessionKeyUpdate(clientInfo, RECEIVER);
+    tprint("Decrypting with seq %lu\n", seqNum);
+    PrivateEncryptDecrypt(encryptedDataChunk, 64, seqNum);
     int type = getType(encryptedDataChunk - 4); //"P2PI0x000D(TYPE)";
     tprint("type is %lx\n", type);
     int newType = 0;
@@ -1993,4 +2019,24 @@ void checkAuth() {
             sendReqAuthMessage(i.second.username);
         }
     }
+}
+
+//update count return value.
+uint64_t sessionKeyUpdate(struct Client& clientInfo, int SendOrRecv)
+{
+	if(SendOrRecv == SENDER){ //if sending a packet
+		clientInfo.TXCount++;
+		if(clientInfo.which == 1) //if this guy established connetion add
+			return clientInfo.sessionKey + clientInfo.TXCount;
+		else if(clientInfo.which == 0)
+			return clientInfo.sessionKey - clientInfo.TXCount;
+	}
+	else if(SendOrRecv == RECEIVER){ //if recv packet
+		clientInfo.RXCount++;
+		if(clientInfo.which == 0) //if this guy established connetion add
+			return clientInfo.sessionKey + clientInfo.RXCount;
+		else if(clientInfo.which == 1)
+			return clientInfo.sessionKey - clientInfo.RXCount;
+	}
+	return 0;
 }
