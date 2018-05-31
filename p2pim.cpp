@@ -185,10 +185,10 @@ int main(int argc, char** argv) {
 			
 			if(findClientByFd(fd)->second.connectionType == 1)
 			{
-				if(GenerateRandomValue()%10000 < 1000){
-				tprint("sending dummy to tcp sock %d\n", findClientByFd(fd)->second.tcpSockFd);
-				writeEncryptedDataChunk(findClientByFd(fd)->second, dummy, 6);
-				}
+				// if(GenerateRandomValue() % 10000 < 200){
+				//     tprint("sending dummy to tcp sock %d\n", client.tcpSockFd);
+				//     writeEncryptedDataChunk(client, dummy, 6);
+				// }
 			}
 		}
 
@@ -1540,15 +1540,15 @@ void checkSTDIN() {
                                 memcpy(outgoingTCPMsg + 4, &type, 2);
 
                                  //target is the fd that the client wishes to speak to.
-								if(encryptMode == 0){
-									if(write(currentConnection, outgoingTCPMsg, 6) < 0){
-										die("Failed to establish send data.\n");
-										break;
-									}
-								}
-								else{
-									writeEncryptedDataChunk( findClientByFd(currentConnection)->second, outgoingTCPMsg, 6);
-								}
+				if(encryptMode == 0){
+					if(write(currentConnection, outgoingTCPMsg, 6) < 0){
+						die("Failed to establish send data.\n");
+						break;
+					}
+				}
+				else{
+					writeEncryptedDataChunk( findClientByFd(currentConnection)->second, outgoingTCPMsg, 6);
+				}
                             }
                             else
                                 tprint("No connection.\n");
@@ -1637,15 +1637,15 @@ void checkSTDIN() {
                                 memcpy(outgoingTCPMsg, "P2PI", 4);
                                 *((uint16_t*)(outgoingTCPMsg + 4)) = htons(USER_UNAVALIBLE);
 								
-								if(findClientByFd(c.first)->second.connectionType == 0){
-									if(write(c.first, outgoingTCPMsg, 6) < 0){
-										die("Failed to send away message.\n");
-									}
-								}
-								else
-								{
-									writeEncryptedDataChunk(findClientByFd(c.first)->second, outgoingTCPMsg, 6);
-								}
+				if(findClientByFd(c.first)->second.connectionType == 0){
+					if(write(c.first, outgoingTCPMsg, 6) < 0){
+						die("Failed to send away message.\n");
+					}
+				}
+				else
+				{
+					writeEncryptedDataChunk(findClientByFd(c.first)->second, outgoingTCPMsg, 6);
+				}
 
                                 clientMap.find(c.second)->second.tcpSockFd = -1;
                             }
@@ -1654,6 +1654,7 @@ void checkSTDIN() {
                             for(auto it = pollFd.begin() + 3; it != pollFd.end();)
                                 it = pollFd.erase(it);
                             away = 1;
+                            currentConnection = -1;
                             break;
                         }
                         case UNAWAY: {
@@ -1833,8 +1834,8 @@ void clearline() {
 //converts unencrytped message into chunks of encrypted messages and sends to client
 void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, uint32_t messageLength)
 {
-    int type = getType(raw_message);
-    int newType;
+    uint16_t type = getType(raw_message);
+    uint16_t newType;
     switch(type) //translates messageType
     {
         case ESTABLISH_COMM: newType = ESTABLISH_COMM_E; break;
@@ -1844,8 +1845,9 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
         case REQUEST_USER_LIST: newType = REQUEST_USER_LIST_E; break;
         case REPLY_USER_LIST: newType = REPLY_USER_LIST_E; break;
         case DATA: newType = DATA_E; break;
-        default: newType = DUMMY_E;
+        default: newType = DUMMY_E; break;
     }
+    tprint("Old type is %u\n", type);
 
     tprint("New type is %u\n", newType);
     uint8_t encryptedDataChunk[70];
@@ -1908,7 +1910,7 @@ int processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encryptedDataC
         case REQUEST_USER_LIST_E: newType = REQUEST_USER_LIST; break;
         case REPLY_USER_LIST_E: newType = REPLY_USER_LIST; break;
         case DATA_E: newType = DATA; break;
-        default: newType = -1;
+        default: newType = DUMMY_E; break;
     }
     return newType;
 }
