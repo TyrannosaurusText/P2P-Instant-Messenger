@@ -179,14 +179,15 @@ int main(int argc, char** argv) {
         timePassed = ((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec) / 1000;
         currTimeout -= timePassed;
 
-		for(auto it: clientMap)
+		for(auto it: tcpConnMap)
 		{
-			auto client = it.second;
-			if(client.tcpSockFd != -1 && client.connectionType == 1)
+			auto fd = it.first;
+			
+			if(findClientByFd(fd)->second.connectionType == 1)
 			{
-				if(GenerateRandomValue()%10000 < 200){
-				tprint("sending dummy to tcp sock %d\n", client.tcpSockFd);
-				writeEncryptedDataChunk(client, dummy, 6);
+				if(GenerateRandomValue()%10000 < 1000){
+				tprint("sending dummy to tcp sock %d\n", findClientByFd(fd)->second.tcpSockFd);
+				writeEncryptedDataChunk(findClientByFd(fd)->second, dummy, 6);
 				}
 			}
 		}
@@ -972,6 +973,7 @@ void checkTCPConnections() {
                     if(away == 1 || clientMap.find(newClientName)->second.block) {
                         // Send user unavailable message
                         *((uint16_t*)(ECM + 4)) = htons(USER_UNAVALIBLE);
+						
                         if(write(it->fd, ECM, 6) < 0) {
                             die("Failed to establish TCP connection.");
                         }
@@ -1538,10 +1540,15 @@ void checkSTDIN() {
                                 memcpy(outgoingTCPMsg + 4, &type, 2);
 
                                  //target is the fd that the client wishes to speak to.
-                                if(write(currentConnection, outgoingTCPMsg, 6) < 0){
-                                    die("Failed to establish send data.\n");
-                                    break;
-                                }
+								if(encryptMode == 0){
+									if(write(currentConnection, outgoingTCPMsg, 6) < 0){
+										die("Failed to establish send data.\n");
+										break;
+									}
+								}
+								else{
+									writeEncryptedDataChunk( findClientByFd(currentConnection)->second, outgoingTCPMsg, 6);
+								}
                             }
                             else
                                 tprint("No connection.\n");
@@ -1629,10 +1636,16 @@ void checkSTDIN() {
                                 uint8_t outgoingTCPMsg[6];
                                 memcpy(outgoingTCPMsg, "P2PI", 4);
                                 *((uint16_t*)(outgoingTCPMsg + 4)) = htons(USER_UNAVALIBLE);
-
-                                if(write(c.first, outgoingTCPMsg, 6) < 0){
-                                    die("Failed to send away message.\n");
-                                }
+								
+								if(findClientByFd(c.first)->second.connectionType == 0){
+									if(write(c.first, outgoingTCPMsg, 6) < 0){
+										die("Failed to send away message.\n");
+									}
+								}
+								else
+								{
+									writeEncryptedDataChunk(findClientByFd(c.first)->second, outgoingTCPMsg, 6);
+								}
 
                                 clientMap.find(c.second)->second.tcpSockFd = -1;
                             }
@@ -1844,6 +1857,7 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
 	if(newType == DUMMY_E)
     {
 		seqNum = sessionKeyUpdate(clientInfo, SENDER);
+        tprint("Encrypting with seq %lu\n", seqNum);
 		uint64_t dummymsg = GenerateRandomValue();
         memcpy(encryptedDataChunk+8, &dummymsg, 62);
         PrivateEncryptDecrypt(encryptedDataChunk + 6, 62, seqNum);
