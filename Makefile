@@ -26,6 +26,7 @@ DEPFLAGS = -MMD -MF $(@:.o=.d)
 $(targets) : $(objs)
 	@echo "CXX $@"
 	$(Q)$(CXX) $(CFLAGS) -o $@ $^ $(DEPFLAGS)
+	$(Q)rm -f $(objs) $(deps)
 
 %.o : %.cpp
 	@echo "CXX $@"
