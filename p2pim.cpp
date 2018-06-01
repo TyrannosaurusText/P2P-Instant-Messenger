@@ -800,7 +800,10 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                         if(it->second.tcpSockFd == currentConnection)
                             currentConnection = -1;
 
-                        it->second.closed = 1;
+                        if(it->second.tcpSockFd == -1)
+                            clientMap.erase(it);
+                        else
+                            it->second.closed = 1;
                     }
                     // If no more host is available, go back to discovery
                     if(clientMap.empty()) {
