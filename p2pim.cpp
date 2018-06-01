@@ -1894,15 +1894,15 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
 }
 
 //return decrypted Type
-int processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encryptedDataChunk)
+uint16_t processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encryptedDataChunk)
 {
 	tprint("session key is: %lu\n", clientInfo.sessionKey);
 	uint64_t seqNum = sessionKeyUpdate(clientInfo, RECEIVER);
     tprint("Decrypting with seq %lu\n", seqNum);
     PrivateEncryptDecrypt(encryptedDataChunk, 64, seqNum);
-    int type = getType(encryptedDataChunk - 4); //"P2PI0x000D(TYPE)";
+    uint16_t type = getType(encryptedDataChunk - 4); //"P2PI0x000D(TYPE)";
     tprint("type is %lx\n", type);
-    int newType = 0;
+    uint16_t newType = 0;
     switch(type) //translates messageType
     {
         case ESTABLISH_COMM_E: newType = ESTABLISH_COMM; break;
@@ -1913,7 +1913,7 @@ int processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encryptedDataC
         case REPLY_USER_LIST_E: newType = REPLY_USER_LIST; break;
         case DATA_E: newType = DATA; break;
 		case DUMMY_E: newType = DUMMY_E;
-        default: newType = -1; break;
+        default: newType = 0xFFFF; break;
     }
     return newType;
 }

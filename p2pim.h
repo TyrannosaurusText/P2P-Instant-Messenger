@@ -28,7 +28,7 @@
 #ifdef DEBUG
     #define dprint(string, ...) {clearline(); printf(string, ##__VA_ARGS__);}
 #else
-    #define dprint(string, ...) 
+    #define dprint(string, ...)
 #endif
 
 
@@ -94,7 +94,7 @@ uint64_t htonll(uint64_t val);
 uint64_t ntohll(uint64_t lav);
 uint64_t bitswap(uint64_t lav);
 void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, uint32_t messageLength);
-int processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encryptedDataChunk);
+uint16_t processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encryptedDataChunk);
 int getTarget(std::string &target);
 void sendReqAuthMessage(std::string name);
 void checkAuth();
