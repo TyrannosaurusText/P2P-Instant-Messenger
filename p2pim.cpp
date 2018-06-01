@@ -188,7 +188,7 @@ int main(int argc, char** argv) {
 			if(findClientByFd(fd)->second.connectionType == 1)
 			{
 				if(GenerateRandomValue() % 10000 < 1000){
-				    tprint("sending dummy to tcp sock %d\n", findClientByFd(fd)->second);
+				    //tprint("sending dummy to tcp sock %d\n", findClientByFd(fd)->second);
 				    writeEncryptedDataChunk(findClientByFd(fd)->second, dummy, 6);
 				}
 			}
@@ -1340,13 +1340,14 @@ void checkTCPConnections() {
                             *((uint16_t*)(ECM + 4)) = htons(REPLY_USER_LIST);
                             *((uint32_t*)(ECM + 6)) = htonl(clientMap.size());
 
+							tprint("%d\n", clientMap.size());
+							
                             // if(0 > write(it->fd, ECM, 10))
                             //     die("Failed to send user list reply");
                             
                             uint8_t userEntry[8 + 256 + 32 + 2];
 							std::vector<uint8_t> userEntrySTR;
-							userEntrySTR.insert(userEntrySTR.end(), ECM, ECM+6);
-                            //writeEncryptedDataChunk(findClientByFd(it->fd)->second, ECM + 4, 6);
+							userEntrySTR.insert(userEntrySTR.end(), ECM, ECM+10);
 
 							//uint64_t vectorLen = 0;
                             int i = 0;
@@ -1373,10 +1374,10 @@ void checkTCPConnections() {
                                 i++;
                             }
 							writeEncryptedDataChunk(findClientByFd(it->fd)->second, userEntrySTR.data(), userEntrySTR.size());
-							/* for(int i = 0; i < userEntrySTR.size(); i++)
+							 for(int i = 0; i < userEntrySTR.size(); i++)
 							{
-								tprint("%d\n", userEntrySTR.at(i));
-							} */
+								tprint("%d %c\n", userEntrySTR.at(i), userEntrySTR.at(i));
+							} 
                             break;
                         }
                         case REPLY_USER_LIST: {
@@ -1384,8 +1385,11 @@ void checkTCPConnections() {
                             char dataMsg[63];
 							tprint("get REPLY_USER_LIST\n");
                             memcpy(dataMsg, encryptedDataChunk + 2, 62);
-
-                            dataMsg[62] = 0;
+							for(int i = 0; i < 62; i++)
+							{
+								tprint("%c %d \n", dataMsg[i], dataMsg[i]);
+                            }
+							dataMsg[62] = 0;
 
                             findClientByFd(it->fd)->second.userMsg += dataMsg;
 
@@ -1394,7 +1398,7 @@ void checkTCPConnections() {
                                 //printf("%s>%s\n", tcpConnMap.find(it->fd)->second.c_str(), findClientByFd(it->fd)->second.userMsg.c_str());
 								std::string msg = findClientByFd(it->fd)->second.userMsg;
 								
-								msg.erase(0,6); //erase P2PI and type.
+								//msg.erase(0,6); //erase P2PI and type.
 								uint32_t entryCount = ntohl(*(uint32_t*)msg.c_str());
 								msg.erase(0,4);
 								
@@ -1827,30 +1831,30 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
         case DATA: newType = DATA_E; break;
         default: newType = DUMMY_E; break;
     }
-    tprint("Old type is %u\n", type);
+    tprint("Old type is %x\n", type);
 
-    tprint("New type is %u\n", newType);
+    tprint("New type is %x\n", newType);
     uint8_t encryptedDataChunk[70];
     strcpy((char*)encryptedDataChunk, "P2PI");
     *((uint16_t*)(encryptedDataChunk + 4)) = ntohs(ENCRYPTED_DATA_CHUNK_MESSAGE);
-    *((uint16_t*)(encryptedDataChunk + 6)) = ntohs(newType); 
+    *((uint16_t*)(raw_message + 4)) = ntohs(newType); 
     uint8_t bytesSent = 0;
 	uint64_t seqNum;
     while(messageLength > bytesSent) //max length encryted message is 62.
     {   
 		seqNum = sessionKeyUpdate(clientInfo, SENDER);
-        GenerateRandomString(encryptedDataChunk + 8, 62, seqNum);
+        GenerateRandomString(encryptedDataChunk + 6, 64, seqNum);
         
-        memcpy(encryptedDataChunk + 8, raw_message + 6 + bytesSent, 
-            (62 < messageLength - 6 - bytesSent? 62 : messageLength - 6 - bytesSent));
+        memcpy(encryptedDataChunk + 6, raw_message + 4 + bytesSent, 
+            (64 < messageLength - 4 - bytesSent? 64 : messageLength - 4 - bytesSent));
         
-        bytesSent += 62;
+        bytesSent += 64;
         tprint("Encrypting with seq %lu\n", seqNum);
-
+/* 		for(int i = 0; i < 70; i++) {
+            tprint("%d\t%c\t%lx\n", encryptedDataChunk[i], encryptedDataChunk[i]);
+        } */
         PrivateEncryptDecrypt(encryptedDataChunk + 6, 64, seqNum);
-        // for(int i = 0; i < 70; i++) {
-        //     tprint("%d\t%c\t%lx\n", encryptedDataChunk[i], encryptedDataChunk[i]);
-        // }
+         
         if(0 > write(clientInfo.tcpSockFd, encryptedDataChunk, 70))
         {
             die("failed to send encrypted message");
@@ -1877,7 +1881,8 @@ int processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encryptedDataC
         case REQUEST_USER_LIST_E: newType = REQUEST_USER_LIST; break;
         case REPLY_USER_LIST_E: newType = REPLY_USER_LIST; break;
         case DATA_E: newType = DATA; break;
-        default: newType = DUMMY_E; break;
+		case DUMMY_E: newType = DUMMY_E;
+        default: newType = -1; break;
     }
     return newType;
 }
