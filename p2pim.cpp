@@ -29,7 +29,10 @@ struct Client {
     uint64_t public_key = 0;
     uint64_t public_key_modulus = 0;
     int closed = 0;
-    // uint64_t sessionKey = 0;
+	int lastEncryptedMesssageType = 0;
+	std::string fileName = ""; //file to transfer
+	std::vector <uint8_t> replyUsrMsg;
+	uint32_t entryCount = 0;
 };
 
 struct Pair {
@@ -1384,69 +1387,76 @@ void checkTCPConnections() {
                             break;
                         }
                         case REPLY_USER_LIST: {
-                            int j = 0, recvLen;
-                            char dataMsg[63];
+							auto client = &findClientByFd(it->fd)->second;
 							tprint("get REPLY_USER_LIST\n");
-                            memcpy(dataMsg, encryptedDataChunk + 2, 62);
+							
+							encryptedDataChunk[64] = 0;
+							
+                            client->replyUsrMsg.insert(client->replyUsrMsg.end(), &encryptedDataChunk[0],  &encryptedDataChunk[63]);
+							client->replyUsrMsg.erase(client->replyUsrMsg.begin(),client->replyUsrMsg.begin()+2); //erase type
+							tprint("asajdhkjashf\n");
+							
 							for(int i = 0; i < 62; i++)
 							{
-								tprint("%c %d \n", dataMsg[i], dataMsg[i]);
+								tprint("%c %d \n", client->replyUsrMsg[i], client->replyUsrMsg[i]);
                             }
-							dataMsg[62] = 0;
-
-                            findClientByFd(it->fd)->second.userMsg += dataMsg;
-
-							if(strlen(dataMsg) < 62) {
-                                clearline();
-                                //printf("%s>%s\n", tcpConnMap.find(it->fd)->second.c_str(), findClientByFd(it->fd)->second.userMsg.c_str());
-								std::string msg = findClientByFd(it->fd)->second.userMsg;
-
-								//msg.erase(0,6); //erase P2PI and type.
-								uint32_t entryCount = ntohl(*(uint32_t*)msg.c_str());
-								msg.erase(0,4);
-
-								for(int k = 0; k < entryCount; k++) {
-									// Get entry number
-									// recvLen = read(it->fd, entryArr, 4);
-									int entryNum = ntohl(*(uint32_t*)(msg.c_str()));
-									msg.erase(0,4);
-									dprint("entry num is %d\n", entryNum);
-
-									struct Client newClient;
-									// recvLen = read(it->fd, entryArr + 4, 2);
-									newClient.udpPort = ntohs(*((uint16_t*)(msg.c_str())));
-									msg.erase(0,2);
-									dprint("udpPort is %d\n", newClient.udpPort);
-
-									int n = 0;
-
-									newClient.hostName = (char*)(msg.c_str());
-									dprint("hostname is %s\n", newClient.hostName.c_str());
-									msg.erase(0, newClient.hostName.length()+1);
-
-									// recvLen = read(it->fd, entryArr + 6 + newClient.hostName.length() + 1, 2);
-									newClient.tcpPort = ntohs(*((uint16_t*)(msg.c_str())));
-									dprint("tcpPort is %d\n", newClient.tcpPort);
-									msg.erase(0, 2);
-
-									n = 0;
-									// get username
-
-
-									newClient.username = (char*)(msg.c_str());
-									msg.erase(0, newClient.username.length()+1);
-									// tprint("username %s, hostname %s, tcp %d, udp %d\n", newClient.username.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
-
-									if(newClient.username != username && clientMap.find(newClient.username) == clientMap.end())
-										clientMap[newClient.username] = newClient;
+							findClientByFd(it->fd)->second.entryCount = ntohl(sieve32(client->replyUsrMsg) );
+							tprint("Entry Count is: %d \n", client->entryCount);
+							client->replyUsrMsg.erase(client->replyUsrMsg.begin(),client->replyUsrMsg.begin()+4);
+ 							for(int k = 0; k < client->entryCount; k++) {
+								tprint("new count\n");
+								
+								if(client->replyUsrMsg.size() < 12) //guarenteed that there is not a complete client
+								{
+									findClientByFd(it->fd)->second.lastEncryptedMesssageType = REPLY_USER_LIST;
+									break;
 								}
-								generateList();
-								tprint("\n%s\n", list.c_str());
-								findClientByFd(it->fd)->second.userMsg = "";
-                            }
+								if( !probeString( ( client->replyUsrMsg.data() +6), client->replyUsrMsg.size() ) ){ //check if hostName valid
+									findClientByFd(it->fd)->second.lastEncryptedMesssageType = REPLY_USER_LIST;
+									break;
+								}
+								if( !probeString( client->replyUsrMsg.data()+6 + strlen( (char*)( client->replyUsrMsg.data()+6 ) ) + 1 + 2 , 
+										client->replyUsrMsg.size() - (strlen( (char*)( client->replyUsrMsg.data()+6 ) ) + 1 + 2))){ //check if userName valid
+									findClientByFd(it->fd)->second.lastEncryptedMesssageType = REPLY_USER_LIST;
+									break;
+								}
+								int entryNum = ntohl(sieve32(client->replyUsrMsg));
+								client->replyUsrMsg.erase(client->replyUsrMsg.begin(),client->replyUsrMsg.begin()+4);
+								//dprint("entry num is %d\n", entryNum);
+
+								struct Client newClient;
+								newClient.udpPort = ntohs(sieve16(client->replyUsrMsg));
+								client->replyUsrMsg.erase(client->replyUsrMsg.begin(),client->replyUsrMsg.begin()+2);
+								//dprint("udpPort is %d\n", newClient.udpPort);
+
+								newClient.hostName = (char*)(client->replyUsrMsg.data());
+								client->replyUsrMsg.erase(client->replyUsrMsg.begin(),
+										client->replyUsrMsg.begin()+newClient.hostName.length()+1); //string + nullbit
+								dprint("hostname is %s\n", newClient.hostName.c_str());
+							
+								newClient.tcpPort = ntohs(sieve16(client->replyUsrMsg));
+								//dprint("tcpPort is %d\n", newClient.tcpPort);
+								client->replyUsrMsg.erase(client->replyUsrMsg.begin(),client->replyUsrMsg.begin()+2);
+
+								// get username
+								newClient.username = (char*)(client->replyUsrMsg.data());
+								client->replyUsrMsg.erase(client->replyUsrMsg.begin(),
+										client->replyUsrMsg.begin()+newClient.username.length()+1);
+								// tprint("username %s, hostname %s, tcp %d, udp %d\n", newClient.username.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
+
+								if(newClient.username != username && clientMap.find(newClient.username) == clientMap.end())
+									clientMap[newClient.username] = newClient;
+								if(entryNum+1 == client->entryCount){
+									generateList();
+									tprint("\n%s\n", list.c_str());
+									client->replyUsrMsg.clear();
+								}	
+							}
+							
+								
 
                             dprint("User %s message.\n", tcpConnMap.find(it->fd)->second.c_str());
-
+ 
 
                             break;
                         }
@@ -1473,6 +1483,8 @@ void checkTCPConnections() {
                                 printf("%s>%s\n", tcpConnMap.find(it->fd)->second.c_str(), findClientByFd(it->fd)->second.userMsg.c_str());
                                 findClientByFd(it->fd)->second.userMsg = "";
                             }
+							else
+								findClientByFd(it->fd)->second.lastEncryptedMesssageType = DATA;
                             break;
                         }
                         case DISCONTINUE_COMM: {
@@ -1502,28 +1514,98 @@ void checkTCPConnections() {
                             break;
                         }
                         default: {
-                            if(findClientByFd(it->fd)->second.userMsg != "") {
-                                char dataMsg[65];
+							switch(findClientByFd(it->fd)->second.lastEncryptedMesssageType)
+							{
+								case REPLY_USER_LIST: {
+									auto client = &findClientByFd(it->fd)->second;
+									tprint("get REPLY_USER_LIST continued\n");
+									encryptedDataChunk[64] = 0;
+									client->replyUsrMsg.insert(client->replyUsrMsg.end(), &encryptedDataChunk[0],  &encryptedDataChunk[63]);
+									for(int k = 0; k < client->entryCount; k++) {
+										if(client->replyUsrMsg.size() < 12) //guarenteed that there is not a complete client
+										{
+											findClientByFd(it->fd)->second.lastEncryptedMesssageType = REPLY_USER_LIST;
+											break;
+										}
+										if( !probeString( ( client->replyUsrMsg.data() +6), client->replyUsrMsg.size() ) ){ //check if hostName valid
+											findClientByFd(it->fd)->second.lastEncryptedMesssageType = REPLY_USER_LIST;
+											break;
+										}
+										if( !probeString( client->replyUsrMsg.data()+6 + 
+											strlen( (char*)( client->replyUsrMsg.data()+6 ) ) + 1 + 2 , client->replyUsrMsg.size()
+											- (strlen( (char*)( client->replyUsrMsg.data()+6 ) ) + 1 + 2))){ //check if userName valid
+											findClientByFd(it->fd)->second.lastEncryptedMesssageType = REPLY_USER_LIST;
+											break;
+										}
+										int entryNum = ntohl(sieve32(client->replyUsrMsg));
+										client->replyUsrMsg.erase(client->replyUsrMsg.begin(),client->replyUsrMsg.begin()+4);
+										//dprint("entry num is %d\n", entryNum);
 
-                                memcpy(dataMsg, encryptedDataChunk, 64);
+										struct Client newClient;
+										newClient.udpPort = ntohs(sieve16(client->replyUsrMsg));
+										client->replyUsrMsg.erase(client->replyUsrMsg.begin(),client->replyUsrMsg.begin()+2);
+										//dprint("udpPort is %d\n", newClient.udpPort);
 
-                                // for(int i = 0; i < 64; i++) {
-                                //     tprint("%d\t%c\t%lx\n", outgoingTCPMsg[i], outgoingTCPMsg[i]);
-                                // }
+										newClient.hostName = (char*)(client->replyUsrMsg.data());
+										client->replyUsrMsg.erase(client->replyUsrMsg.begin(),
+												client->replyUsrMsg.begin()+newClient.hostName.length()+1); //string + nullbit
+										dprint("hostname is %s\n", newClient.hostName.c_str());
+									
+										newClient.tcpPort = ntohs(sieve16(client->replyUsrMsg));
+										//dprint("tcpPort is %d\n", newClient.tcpPort);
+										client->replyUsrMsg.erase(client->replyUsrMsg.begin(),client->replyUsrMsg.begin()+2);
 
-                                dataMsg[64] = 0;
+										// get username
+										newClient.username = (char*)(client->replyUsrMsg.data());
+										client->replyUsrMsg.erase(client->replyUsrMsg.begin(),
+												client->replyUsrMsg.begin()+newClient.username.length()+1);
+										// tprint("username %s, hostname %s, tcp %d, udp %d\n", newClient.username.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
 
-                                findClientByFd(it->fd)->second.userMsg += dataMsg;
-
-
-                                // dprint("User %s message.\n", tcpConnMap.find(it->fd)->second.c_str());
-
-                                if(strlen(dataMsg) < 64) {
-                                    clearline();
-                                    printf("%s>%s\n", tcpConnMap.find(it->fd)->second.c_str(), findClientByFd(it->fd)->second.userMsg.c_str());
-                                    findClientByFd(it->fd)->second.userMsg = "";
-                                }
-                            }
+										if(newClient.username != username && clientMap.find(newClient.username) == clientMap.end())
+											clientMap[newClient.username] = newClient;
+										if(entryNum+1 == client->entryCount){
+											generateList();
+											tprint("\n%s\n", list.c_str());
+											client->replyUsrMsg.clear();
+											findClientByFd(it->fd)->second.lastEncryptedMesssageType = 0;
+										}	
+									}
+									break;
+								}
+								case ESTABLISH_COMM:
+								case DATA:
+								case FILE_TRANFER_OFFER_MESSAGE:
+								{
+									
+									char dataMsg[65];
+									memcpy(dataMsg, encryptedDataChunk, 64);
+									dataMsg[64] = 0;
+									findClientByFd(it->fd)->second.userMsg += dataMsg;
+									
+									if(strlen(dataMsg) < 64){
+										switch(findClientByFd(it->fd)->second.lastEncryptedMesssageType)
+										{
+											case DATA: {
+												tprint("%s>%s\n", tcpConnMap.find(it->fd)->second.c_str(), findClientByFd(it->fd)->second.userMsg.c_str());
+												break;
+											}
+											case ESTABLISH_COMM:
+											{
+												findClientByFd(it->fd)->second.username = findClientByFd(it->fd)->second.userMsg;
+												break;
+											}
+											case FILE_TRANFER_OFFER_MESSAGE:
+											{
+												findClientByFd(it->fd)->second.fileName = findClientByFd(it->fd)->second.userMsg;
+												break;
+											}
+										}
+										findClientByFd(it->fd)->second.lastEncryptedMesssageType = 0;
+										findClientByFd(it->fd)->second.userMsg = "";
+									}
+									break;
+								}
+							}
 
                         }
                     }
@@ -1540,6 +1622,34 @@ void checkTCPConnections() {
 
         it++;
     }
+}
+
+
+uint64_t sieve64(std::vector<uint8_t> arr){
+	uint64_t val = 0;
+	val = *(uint64_t*)arr.data();
+	return val;
+}
+uint32_t sieve32(std::vector<uint8_t> arr){
+	uint32_t val = 0;
+	val = *(uint32_t*)(arr.data());
+	return val;
+}
+uint16_t sieve16(std::vector<uint8_t> arr){
+	uint16_t val = 0;
+	val = *(uint16_t*)arr.data();
+	return val;
+}
+
+
+bool probeString(uint8_t* encryptedDataChunk, int len)
+{
+	for(int i = 0; i < len; i++)
+	{
+		if(encryptedDataChunk[i] == 0)
+			return true;
+	}
+	return false;
 }
 
 void checkSTDIN() {

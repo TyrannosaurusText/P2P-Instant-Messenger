@@ -56,6 +56,10 @@
 #define DISCONTINUE_COMM_E 0xF0F0
 #define DUMMY_E 0x0F0F
 
+#define FILE_TRANFER_OFFER_MESSAGE 0xF5A0
+#define FILE_TRANFER_RESPONSE_MESSAGE 0x05AF
+#define FILE_DATA_MESSAGE 0x50AF
+
 
 #define terminalFDPOLL 0
 #define udpFDPOLL 1
@@ -99,3 +103,7 @@ int getTarget(std::string &target);
 void sendReqAuthMessage(std::string name);
 void checkAuth();
 uint64_t sessionKeyUpdate(struct Client& clientInfo, int SendorRecv);
+bool probeString(uint8_t* data, int len);
+uint64_t sieve64(std::vector<uint8_t> arr);
+uint32_t sieve32(std::vector<uint8_t> arr);
+uint16_t sieve16(std::vector<uint8_t> arr);
