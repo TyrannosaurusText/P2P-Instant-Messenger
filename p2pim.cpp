@@ -416,6 +416,10 @@ void parseOptions(int argc, char** argv) {
                     case USERNAME: {
                         optionMap[argv[i]] = -1;
                         username = argv[i + 1];
+                        if(username.length() > 31) {
+                            fprintf(stderr, "Username should not be longer than 32 characters\n");
+                            exit(1);
+                        }
                         break;
                     }
                     case UDP_PORT: {
