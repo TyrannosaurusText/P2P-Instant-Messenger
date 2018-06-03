@@ -168,7 +168,7 @@ int main(int argc, char** argv) {
         else
             connName = tcpConnMap.find(currentConnection)->second;
 
-        if(message.length()+connName.length() > numcol) //simulate loop
+        if(message.length()+connName.length()+1 > numcol) //simulate loop
         {
             printf("%s>%s", connName.c_str(), message.substr(message.length()-numcol+connName.length()+1, numcol).c_str());
         }
@@ -416,10 +416,6 @@ void parseOptions(int argc, char** argv) {
                     case USERNAME: {
                         optionMap[argv[i]] = -1;
                         username = argv[i + 1];
-                        if(username.length() > 31) {
-                            fprintf(stderr, "Username should not be longer than 32 characters\n");
-                            exit(1);
-                        }
                         break;
                     }
                     case UDP_PORT: {
