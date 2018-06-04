@@ -1286,10 +1286,38 @@ void checkTCPConnections() {
 
                             std::string fileName = (char*)(encryptedDataChunk + 10);
 
+                            // uint8_t fileNameArr[55];;
+                            // memcpy(fileNameArr, encryptedDataChunk + 10, 54);
+                            // fileNameArr[54] = 0;
+
+                            // std::string fileName = (char*)(fileNameArr);
+
+                            // if(fileName.length() == 54)
+                            //     findClientByFd(it->fd)->second.fileName += fileName;
+
                             tprint("File offer: %s, %u bytes\n", fileName.c_str(), fileSize);
+
+                            // Prompt user
+                            uint16_t response;
+
+                            response = htons(0);
+                            
+                            uint8_t FRM[8];
+                            *((uint16_t*)(FRM + 4)) = htons(FILE_TRANFER_RESPONSE_MESSAGE);
+                            *((uint16_t*)(FRM + 6)) = htons(response);
+
+                            writeEncryptedDataChunk(findClientByFd(it->fd)->second, FRM, 8);
+
                             break;
                         }
                         case FILE_TRANFER_RESPONSE_MESSAGE: {
+                            if(ntohs(*((uint16_t*)(encryptedDataChunk + 2))) == 0) {
+                                tprint("Rejected\n");
+                            }
+                            else {
+                                tprint("Accepted\n");
+                            }
+
                             break;
                         }
                         case FILE_DATA_MESSAGE:{
@@ -2028,7 +2056,10 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
         case REQUEST_USER_LIST: newType = REQUEST_USER_LIST_E; break;
         case REPLY_USER_LIST: newType = REPLY_USER_LIST_E; break;
         case DATA: newType = DATA_E; break;
-        case FILE_TRANFER_OFFER_MESSAGE: newType = type; break;
+        case FILE_TRANFER_OFFER_MESSAGE: 
+        case FILE_TRANFER_RESPONSE_MESSAGE:
+        case FILE_DATA_MESSAGE:
+            newType = type; break;
         default: newType = DUMMY_E; break;
     }
     tprint("Old type is %x\n", type);
@@ -2081,7 +2112,10 @@ uint16_t processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encrypted
         case REQUEST_USER_LIST_E: newType = REQUEST_USER_LIST; break;
         case REPLY_USER_LIST_E: newType = REPLY_USER_LIST; break;
         case DATA_E: newType = DATA; break;
-        case FILE_TRANFER_OFFER_MESSAGE: newType = type; break;
+        case FILE_TRANFER_OFFER_MESSAGE: 
+        case FILE_TRANFER_RESPONSE_MESSAGE:
+        case FILE_DATA_MESSAGE:
+            newType = type; break;
 		case DUMMY_E: newType = DUMMY_E;
         default: newType = 0xFFFF; break;
     }
