@@ -33,6 +33,7 @@ struct Client {
 	std::string fileName = ""; //file to transfer
 	std::vector <uint8_t> replyUsrMsg;
 	uint32_t entryCount = 0;
+	bool acceptingFileTransferFrom = 0;
 };
 
 struct Pair {
@@ -77,6 +78,7 @@ socklen_t udpClientAddrLen, tcpClientAddrLen;
 
 std::vector<struct pollfd> pollFd(3);
 std::vector<struct Pair> unicastHosts;
+std::vector<struct Pair> fileTransferOffer;
 
 int away = 0;
 
@@ -191,7 +193,7 @@ int main(int argc, char** argv) {
 
 			if(findClientByFd(fd)->second.connectionType == 1)
 			{
-				if(GenerateRandomValue() % 10000 < 1000){
+				if(GenerateRandomValue() % 10000 < 100){
 				    //tprint("sending dummy to tcp sock %d\n", findClientByFd(fd)->second);
 				    writeEncryptedDataChunk(findClientByFd(fd)->second, dummy, 6);
 				}
@@ -1003,7 +1005,7 @@ void checkTCPConnections() {
                     else {
                         // Send accept comm message
                         *((uint16_t*)(ECM + 4)) = type == ESTABLISH_COMM ? htons(ACCEPT_COMM) : htons(ACCEPT_ENCRYPTED_COMM);
-						tprint("New sock FD is: %d\n", it->fd);
+						//tprint("New sock FD is: %d\n", it->fd);
                         clientMap.find(newClientName)->second.tcpSockFd = it->fd;
                         tcpConnMap[it->fd] = newClientName;
 
@@ -1295,19 +1297,13 @@ void checkTCPConnections() {
                             // if(fileName.length() == 54)
                             //     findClientByFd(it->fd)->second.fileName += fileName;
 
-                            tprint("File offer: %s, %u bytes\n", fileName.c_str(), (unsigned int) fileSize);
-
-                            // Prompt user
-                            uint16_t response;
-
-                            response = htons(0);
-                            
-                            uint8_t FRM[8];
-                            *((uint16_t*)(FRM + 4)) = htons(FILE_TRANFER_RESPONSE_MESSAGE);
-                            *((uint16_t*)(FRM + 6)) = htons(response);
-
-                            writeEncryptedDataChunk(findClientByFd(it->fd)->second, FRM, 8);
-
+                            tprint("File offer: %s, %u bytes. Accept transfer? (yes/no)\n", fileName.c_str(), (unsigned int) fileSize);
+							struct Pair temp;
+							temp.hostName = fileName.c_str();
+							temp.portNum = it->fd;
+							fileTransferOffer.push_back( temp );
+							
+							
                             break;
                         }
                         case FILE_TRANFER_RESPONSE_MESSAGE: {
@@ -1746,232 +1742,267 @@ void checkSTDIN() {
                 printf("%s>%s\n",username.c_str(), message.c_str());
 
                 std::string firstWord = message.substr(0, message.find_first_of(" ",0));
-                if(commandMap.find(firstWord) != commandMap.end()) {
-                    switch(commandMap[firstWord]) {
-                        case SENDFILE: {
-                            std::string target;
-                            if(-1==getTarget(target))
-                            {
-                                tprint("No file specified.\n");
-                                break;
-                            }
+				if(fileTransferOffer.size() > 0)
+				{
+					auto offer= fileTransferOffer.at(0); // hostName = FILENAME, portNum = TCPSOCKFILEDESCRIPTOR
+					for(int i = 0; i < firstWord.length(); i++)
+					{
+						firstWord[i] = std::tolower(firstWord[i]);
+					}
+					if(firstWord == "yes"|| firstWord == "no")
+					{
+						// Prompt user
+						uint16_t response = (firstWord == "yes");
+						
+						//response = htons(0);
+						
+						uint8_t FRM[8];
+						*((uint16_t*)(FRM + 4)) = htons(FILE_TRANFER_RESPONSE_MESSAGE);
+						*((uint16_t*)(FRM + 6)) = htons(response);
 
-                            if(access(target.c_str(), F_OK) < 0) {
-                                die("File does not exits\n");
-                            }
-
-                            struct stat buf;
-                            if(stat(target.c_str(), &buf) < 0)
-                                die("Failed to stat file\n");
-
-                            off_t size = buf.st_size;
-
-                            uint8_t FOM[269];
-                            memset(FOM, 0, 269);
-                            *((uint16_t*)(FOM + 4)) = htons(FILE_TRANFER_OFFER_MESSAGE);
-                            *((uint64_t*)(FOM + 6)) = htonll(size);
-                            memcpy(FOM + 14, target.c_str(), target.length());
-
-                            writeEncryptedDataChunk(findClientByFd(currentConnection)->second, FOM, 14 + target.length() + 1);
-
-                            break;
-                        }
-                        case CONNECT: {
-                            std::string target;
-                            if(-1==getTarget(target))
-                            {
-                                tprint("No users specified.\n");
-                                break;
-                            }
-                            tprint("Looking for user: %s\n", target.c_str());
-                            auto client = clientMap.find(target);
-                            if( client != clientMap.end() ) {
-                                client->second.block = 0;
-                                if(client->second.tcpSockFd == -1) {
-                                    connectToClient(target);
-                                    currentConnection = client->second.tcpSockFd;
-                                }
-                                else{
-                                    tprint("Connected to user: %s\n", target.c_str());
-                                    currentConnection = client->second.tcpSockFd;
-                                }
-                            }
-                            else
-                                tprint("No user '%s' found.\n", target.c_str());
-
-                            break;
-                        }
-                        case GETLIST: {
-                            if(currentConnection != -1) {
-                                sendTCPMessage(REQUEST_USER_LIST, currentConnection);
-                            }
-                            else
-                                tprint("No connection.\n");
-
-                            break;
-                        }
-                        case SWITCH: {
-                            std::string target;
-                            if(-1 == getTarget(target))
-                            {
-                                tprint("No users specified.\n");
-                                break;
-                            }
-                            if(clientMap.find(target) != clientMap.end() && clientMap.find(target)->second.tcpSockFd != -1)
-                                currentConnection = clientMap.find(target)->second.tcpSockFd;
-                            else
-                                tprint("Requires a valid connection.\n");
-
-                            break;
-                        }
-                        case DISCONNECT: {
-                            if(currentConnection != -1){
-                                tprint("Closing connection with %s\n", tcpConnMap.find(currentConnection)->second.c_str());
-                                sendTCPMessage(DISCONTINUE_COMM, currentConnection);
-
-                                if(tcpConnMap.find(currentConnection) != tcpConnMap.end()) {
-                                    std::string connName = tcpConnMap.find(currentConnection)->second;
-                                    close(clientMap.find(connName)->second.tcpSockFd);
-
-                                    for(auto it = pollFd.begin(); it != pollFd.end(); it++) {
-                                        if(it->fd == currentConnection){
-                                            pollFd.erase(it);
-                                            break;
-                                        }
-                                    }
-                                    tcpConnMap.erase(currentConnection);
-                                    clientMap.find(connName)->second.tcpSockFd = -1;
-                                }
-                                else
-                                    tprint("Current Connection no longer exists.\n");
-                                currentConnection = -1;
-                            }
-                            else
-                                tprint("Connection must be the current active connection.\n");
-
-                            break;
-                        }
-                        case LIST: {
-                            generateList();
-                            tprint("%s", list.c_str());
-                            break;
-                        }
-                        case HELP: {
-                            tprint("List of Commands:\n\\connect username \n\t-establishes connection to a user\n");
-                            tprint("\\disconnect \n\t-closes communication channel between current connection\n");
-                            tprint("\\switch username \n\t-redirect messages to the specified user if a connection\n\t has been established\n");
-                            tprint("\\getlist \n\t-gets the list of users from current connection\n");
-                            tprint("\\list \n\t-gets your current userlist\n");
-                            tprint("\\help\n\t-it's a mystery\n");
-                            tprint("\\away \n\t-sets self to away\n");
-                            tprint("\\unaway\n\t-brings self back from away.\n");
-                            tprint("\\block username\n\t-when you don't want to talk to that person\n");
-                            tprint("\\unblock username\n\t-when you want to become friend with someone again\n");
-							tprint("\\encrypt\n\t- enables/disables encrypted sending");
-							tprint("\\exit\n\t- closes program\n");
-                            break;
-                        }
-
-
-                        case AWAY: {
-                            for(auto c: tcpConnMap) {
-                                sendTCPMessage(USER_UNAVALIBLE, c.first);
-
-                                clientMap.find(c.second)->second.tcpSockFd = -1;
-                            }
-                            tprint("Set status away\n");
-                            tcpConnMap.clear();
-                            for(auto it = pollFd.begin() + 3; it != pollFd.end();)
-                                it = pollFd.erase(it);
-                            away = 1;
-                            currentConnection = -1;
-                            break;
-                        }
-                        case UNAWAY: {
-                            away = 0;
-                            break;
-                        }
-
-
-                        case BLOCK: {
-                            std::string target;
-                            if(-1 == getTarget(target))
-                            {
-                                tprint("No users specified.\n");
-                                break;
-                            }
-                            // Find user
-                            auto client = clientMap.find(target);
-                            if(client != clientMap.end()) {
-                                if(client->second.tcpSockFd != -1)
-                                    sendTCPMessage(DISCONTINUE_COMM, client->second.tcpSockFd);
-
-                                client->second.block = 1;
-
-                                close(client->second.tcpSockFd);
-                                for(auto it = pollFd.begin(); it != pollFd.end(); it++) {
-                                    if(it->fd == client->second.tcpSockFd){
-                                        pollFd.erase(it);
-                                        break;
-                                    }
-                                }
-                                tcpConnMap.erase(client->second.tcpSockFd);
-                                if(currentConnection == client->second.tcpSockFd) {
-                                    currentConnection = -1;
-                                }
-                                client->second.tcpSockFd = -1;
-                            }
-                            // User not found
-                            else
-                                tprint("User %s not found.\n", target.c_str());
-
-                            break;
-                        }
-                        case UNBLOCK: {
-                            std::string target;
-                            if(-1==getTarget(target))
-                            {
-                                tprint("No users specified.\n");
-                                break;
-                            }
-                            // Find user
-                            if(clientMap.find(target) != clientMap.end())
-                               clientMap.find(target)->second.block = 0;
-                            // User not found
-                            else
-                                tprint("User %s not found.\n", target.c_str());
-
-                            break;
-                        }
-                        case EXIT: {
-                            raise(SIGINT);
-                        }
-						case ENCRYPT:
+						writeEncryptedDataChunk(findClientByFd(offer.portNum)->second, FRM, 8);
+						if(response)
 						{
-							if(encryptMode == 1)
-							{
-								encryptMode = 0;
-								tprint("Encryption off.\n");
-							}
-							else if( auth == GOOD )
-							{
-								encryptMode = 1;
-								tprint("Encryption on.\n");
-							}
-							else
-							{
-								tprint("Authentication Required.\n");
-							}
-							break;
+							findClientByFd(offer.portNum)->second.acceptingFileTransferFrom = 1;
 						}
-                    }
-                }
-                else if(currentConnection != -1){
-                    sendDataMessage(message);
-                }
-                else{
-                    tprint("No connection established, to connect use: \\connect Username\n");
-                }
+						else{
+							findClientByFd(offer.portNum)->second.acceptingFileTransferFrom = 0;
+						}
+						fileTransferOffer.erase(fileTransferOffer.begin(), fileTransferOffer.begin()+1);
+					}
+					else
+					{
+						tprint("User %s requesting file transfer. File Name: %s\n (yes/no)", findClientByFd(offer.portNum)->second.username.c_str(), offer.hostName.c_str());
+					}
+				}
+				else{
+					if(commandMap.find(firstWord) != commandMap.end()) {
+						switch(commandMap[firstWord]) {
+							case SENDFILE: {
+								std::string target;
+								if(-1==getTarget(target))
+								{
+									tprint("No file specified.\n");
+									break;
+								}
+
+								if(access(target.c_str(), F_OK) < 0) {
+									die("File does not exits\n");
+								}
+
+								struct stat buf;
+								if(stat(target.c_str(), &buf) < 0)
+									die("Failed to stat file\n");
+
+								off_t size = buf.st_size;
+
+								uint8_t FOM[269];
+								memset(FOM, 0, 269);
+								*((uint16_t*)(FOM + 4)) = htons(FILE_TRANFER_OFFER_MESSAGE);
+								*((uint64_t*)(FOM + 6)) = htonll(size);
+								memcpy(FOM + 14, target.c_str(), target.length());
+
+								writeEncryptedDataChunk(findClientByFd(currentConnection)->second, FOM, 14 + target.length() + 1);
+
+								break;
+							}
+							case CONNECT: {
+								std::string target;
+								if(-1==getTarget(target))
+								{
+									tprint("No users specified.\n");
+									break;
+								}
+								tprint("Looking for user: %s\n", target.c_str());
+								auto client = clientMap.find(target);
+								if( client != clientMap.end() ) {
+									client->second.block = 0;
+									if(client->second.tcpSockFd == -1) {
+										connectToClient(target);
+										currentConnection = client->second.tcpSockFd;
+									}
+									else{
+										tprint("Connected to user: %s\n", target.c_str());
+										currentConnection = client->second.tcpSockFd;
+									}
+								}
+								else
+									tprint("No user '%s' found.\n", target.c_str());
+
+								break;
+							}
+							case GETLIST: {
+								if(currentConnection != -1) {
+									sendTCPMessage(REQUEST_USER_LIST, currentConnection);
+								}
+								else
+									tprint("No connection.\n");
+
+								break;
+							}
+							case SWITCH: {
+								std::string target;
+								if(-1 == getTarget(target))
+								{
+									tprint("No users specified.\n");
+									break;
+								}
+								if(clientMap.find(target) != clientMap.end() && clientMap.find(target)->second.tcpSockFd != -1)
+									currentConnection = clientMap.find(target)->second.tcpSockFd;
+								else
+									tprint("Requires a valid connection.\n");
+
+								break;
+							}
+							case DISCONNECT: {
+								if(currentConnection != -1){
+									tprint("Closing connection with %s\n", tcpConnMap.find(currentConnection)->second.c_str());
+									sendTCPMessage(DISCONTINUE_COMM, currentConnection);
+
+									if(tcpConnMap.find(currentConnection) != tcpConnMap.end()) {
+										std::string connName = tcpConnMap.find(currentConnection)->second;
+										close(clientMap.find(connName)->second.tcpSockFd);
+
+										for(auto it = pollFd.begin(); it != pollFd.end(); it++) {
+											if(it->fd == currentConnection){
+												pollFd.erase(it);
+												break;
+											}
+										}
+										tcpConnMap.erase(currentConnection);
+										clientMap.find(connName)->second.tcpSockFd = -1;
+									}
+									else
+										tprint("Current Connection no longer exists.\n");
+									currentConnection = -1;
+								}
+								else
+									tprint("Connection must be the current active connection.\n");
+
+								break;
+							}
+							case LIST: {
+								generateList();
+								tprint("%s", list.c_str());
+								break;
+							}
+							case HELP: {
+								tprint("List of Commands:\n\\connect username \n\t-establishes connection to a user\n");
+								tprint("\\disconnect \n\t-closes communication channel between current connection\n");
+								tprint("\\switch username \n\t-redirect messages to the specified user if a connection\n\t has been established\n");
+								tprint("\\getlist \n\t-gets the list of users from current connection\n");
+								tprint("\\list \n\t-gets your current userlist\n");
+								tprint("\\help\n\t-it's a mystery\n");
+								tprint("\\away \n\t-sets self to away\n");
+								tprint("\\unaway\n\t-brings self back from away.\n");
+								tprint("\\block username\n\t-when you don't want to talk to that person\n");
+								tprint("\\unblock username\n\t-when you want to become friend with someone again\n");
+								tprint("\\encrypt\n\t- enables/disables encrypted sending");
+								tprint("\\exit\n\t- closes program\n");
+								break;
+							}
+
+
+							case AWAY: {
+								for(auto c: tcpConnMap) {
+									sendTCPMessage(USER_UNAVALIBLE, c.first);
+
+									clientMap.find(c.second)->second.tcpSockFd = -1;
+								}
+								tprint("Set status away\n");
+								tcpConnMap.clear();
+								for(auto it = pollFd.begin() + 3; it != pollFd.end();)
+									it = pollFd.erase(it);
+								away = 1;
+								currentConnection = -1;
+								break;
+							}
+							case UNAWAY: {
+								away = 0;
+								break;
+							}
+
+
+							case BLOCK: {
+								std::string target;
+								if(-1 == getTarget(target))
+								{
+									tprint("No users specified.\n");
+									break;
+								}
+								// Find user
+								auto client = clientMap.find(target);
+								if(client != clientMap.end()) {
+									if(client->second.tcpSockFd != -1)
+										sendTCPMessage(DISCONTINUE_COMM, client->second.tcpSockFd);
+
+									client->second.block = 1;
+
+									close(client->second.tcpSockFd);
+									for(auto it = pollFd.begin(); it != pollFd.end(); it++) {
+										if(it->fd == client->second.tcpSockFd){
+											pollFd.erase(it);
+											break;
+										}
+									}
+									tcpConnMap.erase(client->second.tcpSockFd);
+									if(currentConnection == client->second.tcpSockFd) {
+										currentConnection = -1;
+									}
+									client->second.tcpSockFd = -1;
+								}
+								// User not found
+								else
+									tprint("User %s not found.\n", target.c_str());
+
+								break;
+							}
+							case UNBLOCK: {
+								std::string target;
+								if(-1==getTarget(target))
+								{
+									tprint("No users specified.\n");
+									break;
+								}
+								// Find user
+								if(clientMap.find(target) != clientMap.end())
+								   clientMap.find(target)->second.block = 0;
+								// User not found
+								else
+									tprint("User %s not found.\n", target.c_str());
+
+								break;
+							}
+							case EXIT: {
+								raise(SIGINT);
+							}
+							case ENCRYPT:
+							{
+								if(encryptMode == 1)
+								{
+									encryptMode = 0;
+									tprint("Encryption off.\n");
+								}
+								else if( auth == GOOD )
+								{
+									encryptMode = 1;
+									tprint("Encryption on.\n");
+								}
+								else
+								{
+									tprint("Authentication Required.\n");
+								}
+								break;
+							}
+						}
+					}				
+					else if(currentConnection != -1){
+						sendDataMessage(message);
+					}
+					else{
+						tprint("No connection established, to connect use: \\connect Username\n");
+					}
+				}
                 message.clear();
             }
                 //eraselines(message.length()/numcol);
@@ -2087,8 +2118,8 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
             (64 < messageLength - 4 - bytesSent? 64 : messageLength - 4 - bytesSent));
 
         bytesSent += 64;
-        tprint("Encrypting with seq %lu\n", seqNum);
-        tprint("Encrypting bytes %lu of %lu\n", (unsigned long)bytesSent, (unsigned long)messageLength);
+        //tprint("Encrypting with seq %lu\n", seqNum);
+        //tprint("Encrypting bytes %lu of %lu\n", (unsigned long)bytesSent, (unsigned long)messageLength);
 /* 		01for(int i = 0; i < 70; i++) {
             tprint("%d\t%c\t%lx\n", encryptedDataChunk[i], encryptedDataChunk[i]);
         } */
@@ -2104,12 +2135,12 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
 //return decrypted Type
 uint16_t processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encryptedDataChunk)
 {
-	tprint("session key is: %lu\n", clientInfo.sessionKey);
+	//tprint("session key is: %lu\n", clientInfo.sessionKey);
 	uint64_t seqNum = sessionKeyUpdate(clientInfo, RECEIVER);
-    tprint("Decrypting with seq %lu\n", seqNum);
+    //tprint("Decrypting with seq %lu\n", seqNum);
     PrivateEncryptDecrypt(encryptedDataChunk, 64, seqNum);
     uint16_t type = getType(encryptedDataChunk - 4); //"P2PI0x000D(TYPE)";
-    tprint("type is %lx\n", (long unsigned int)type);
+    //tprint("type is %lx\n", (long unsigned int)type);
     uint16_t newType = 0;
     switch(type) //translates messageType
     {
