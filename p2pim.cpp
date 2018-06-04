@@ -416,6 +416,10 @@ void parseOptions(int argc, char** argv) {
                     case USERNAME: {
                         optionMap[argv[i]] = -1;
                         username = argv[i + 1];
+						if(username.length() > 32) {
+                            fprintf(stderr, "Username should not be longer than 32 characters\n");
+                            exit(1);
+                        }
                         break;
                     }
                     case UDP_PORT: {
@@ -1262,7 +1266,8 @@ void checkTCPConnections() {
 				case ENCRYPTED_DATA_CHUNK_MESSAGE: {
                     tprint("ENCRYPTED_DATA_CHUNK_MESSAGE\n");
 
-                    uint8_t encryptedDataChunk[64];
+                    uint8_t encryptedDataChunk[65];
+					encryptedDataChunk[64] = 0;
                     // uint8_t* encryptedDataChunk = incomingTCPMsg + 6;
                     if(read(it->fd, encryptedDataChunk, 64) < 0)
                         die("Failed to read encryptedDataChunk");
@@ -1390,21 +1395,19 @@ void checkTCPConnections() {
 							auto client = &findClientByFd(it->fd)->second;
 							tprint("get REPLY_USER_LIST\n");
 							
-							encryptedDataChunk[64] = 0;
+							//encryptedDataChunk[65] = 0;
 							
-                            client->replyUsrMsg.insert(client->replyUsrMsg.end(), &encryptedDataChunk[0],  &encryptedDataChunk[63]);
+                            client->replyUsrMsg.insert(client->replyUsrMsg.end(), &encryptedDataChunk[0],  &encryptedDataChunk[64]);
 							client->replyUsrMsg.erase(client->replyUsrMsg.begin(),client->replyUsrMsg.begin()+2); //erase type
-							tprint("asajdhkjashf\n");
 							
-							for(int i = 0; i < 62; i++)
+							/* for(int i = 0; i < 64; i++)
 							{
 								tprint("%c %d \n", client->replyUsrMsg[i], client->replyUsrMsg[i]);
-                            }
+                            } */
 							findClientByFd(it->fd)->second.entryCount = ntohl(sieve32(client->replyUsrMsg) );
 							tprint("Entry Count is: %d \n", client->entryCount);
 							client->replyUsrMsg.erase(client->replyUsrMsg.begin(),client->replyUsrMsg.begin()+4);
  							for(int k = 0; k < client->entryCount; k++) {
-								tprint("new count\n");
 								
 								if(client->replyUsrMsg.size() < 12) //guarenteed that there is not a complete client
 								{
@@ -1442,12 +1445,14 @@ void checkTCPConnections() {
 								newClient.username = (char*)(client->replyUsrMsg.data());
 								client->replyUsrMsg.erase(client->replyUsrMsg.begin(),
 										client->replyUsrMsg.begin()+newClient.username.length()+1);
-								// tprint("username %s, hostname %s, tcp %d, udp %d\n", newClient.username.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
+								//tprint("username %s, hostname %s, tcp %d, udp %d\n", newClient.username.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
 
 								if(newClient.username != username && clientMap.find(newClient.username) == clientMap.end())
 									clientMap[newClient.username] = newClient;
 								if(entryNum+1 == client->entryCount){
 									generateList();
+									tprint("new client\n")
+
 									tprint("\n%s\n", list.c_str());
 									client->replyUsrMsg.clear();
 								}	
@@ -1514,13 +1519,19 @@ void checkTCPConnections() {
                             break;
                         }
                         default: {
+							tprint("DEFAULT CASE\n");
 							switch(findClientByFd(it->fd)->second.lastEncryptedMesssageType)
 							{
+								
 								case REPLY_USER_LIST: {
 									auto client = &findClientByFd(it->fd)->second;
 									tprint("get REPLY_USER_LIST continued\n");
-									encryptedDataChunk[64] = 0;
-									client->replyUsrMsg.insert(client->replyUsrMsg.end(), &encryptedDataChunk[0],  &encryptedDataChunk[63]);
+									encryptedDataChunk[65] = 0;
+									client->replyUsrMsg.insert(client->replyUsrMsg.end(), &encryptedDataChunk[0],  &encryptedDataChunk[64]);
+									/* for(int i = 0; i < 65; i++)
+									{
+										tprint("%c %d \n", encryptedDataChunk[i], encryptedDataChunk[i]);
+									} */
 									for(int k = 0; k < client->entryCount; k++) {
 										if(client->replyUsrMsg.size() < 12) //guarenteed that there is not a complete client
 										{
@@ -1559,10 +1570,12 @@ void checkTCPConnections() {
 										newClient.username = (char*)(client->replyUsrMsg.data());
 										client->replyUsrMsg.erase(client->replyUsrMsg.begin(),
 												client->replyUsrMsg.begin()+newClient.username.length()+1);
-										// tprint("username %s, hostname %s, tcp %d, udp %d\n", newClient.username.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
+										//tprint("username %s, hostname %s, tcp %d, udp %d\n", newClient.username.c_str(), newClient.hostName.c_str(), newClient.tcpPort, newClient.udpPort);
 
-										if(newClient.username != username && clientMap.find(newClient.username) == clientMap.end())
+										if(newClient.username != username && clientMap.find(newClient.username) == clientMap.end()){
+											tprint("new client\n")
 											clientMap[newClient.username] = newClient;
+										}
 										if(entryNum+1 == client->entryCount){
 											generateList();
 											tprint("\n%s\n", list.c_str());
@@ -1990,8 +2003,8 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
             (64 < messageLength - 4 - bytesSent? 64 : messageLength - 4 - bytesSent));
 
         bytesSent += 64;
-        tprint("Encrypting with seq %lu\n", seqNum);
-/* 		for(int i = 0; i < 70; i++) {
+        //tprint("Encrypting with seq %lu\n", seqNum);
+/* 		01for(int i = 0; i < 70; i++) {
             tprint("%d\t%c\t%lx\n", encryptedDataChunk[i], encryptedDataChunk[i]);
         } */
         PrivateEncryptDecrypt(encryptedDataChunk + 6, 64, seqNum);
@@ -2022,7 +2035,7 @@ uint16_t processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encrypted
         case REQUEST_USER_LIST_E: newType = REQUEST_USER_LIST; break;
         case REPLY_USER_LIST_E: newType = REPLY_USER_LIST; break;
         case DATA_E: newType = DATA; break;
-		case DUMMY_E: newType = DUMMY_E;
+		case DUMMY_E: newType = DUMMY_E; break;
         default: newType = 0xFFFF; break;
     }
     return newType;
