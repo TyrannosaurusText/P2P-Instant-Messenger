@@ -30,7 +30,12 @@ struct Client {
     uint64_t public_key_modulus = 0;
     int closed = 0;
 	int lastEncryptedMesssageType = 0;
-	std::string fileName = ""; //file to transfer
+    std::string fileNameSending = ""; //file to transfer
+    std::string fileNameReceiving = ""; //file to receive
+    offset_t fileReceivingOffset = 0; //file to receive
+	offset_t fileSendingOffset = 0; //file to receive
+    int fileSendingFd = 0;
+    int fileReceivingFd = 0;
 	std::vector <uint8_t> replyUsrMsg;
 	uint32_t entryCount = 0;
 };
@@ -1284,18 +1289,21 @@ void checkTCPConnections() {
                             tprint("File offer!!!!!!!!\n");
                             off_t fileSize = ntohll(*((uint64_t*)(encryptedDataChunk + 2)));
 
-                            std::string fileName = (char*)(encryptedDataChunk + 10);
+                            // std::string fileName = (char*)(encryptedDataChunk + 10);
 
-                            // uint8_t fileNameArr[55];;
-                            // memcpy(fileNameArr, encryptedDataChunk + 10, 54);
-                            // fileNameArr[54] = 0;
+                            uint8_t fileNameArr[55];
+                            memcpy(fileNameArr, encryptedDataChunk + 10, 54);
+                            fileNameArr[54] = 0;
 
-                            // std::string fileName = (char*)(fileNameArr);
+                            std::string fileName = (char*)(fileNameArr);
+                            findClientByFd(it->fd)->second.fileNameReceiving += fileName;
 
-                            // if(fileName.length() == 54)
-                            //     findClientByFd(it->fd)->second.fileName += fileName;
-
-                            tprint("File offer: %s, %u bytes\n", fileName.c_str(), (unsigned int) fileSize);
+                            if(fileName.length() == 54) {
+                                findClientByFd(it->fd)->second.lastEncryptedMesssageType = FILE_TRANFER_OFFER_MESSAGE;
+                                findClientByFd(it->fd)->second.userMsg += fileName;  
+                            }
+                            else
+                                tprint("File offer: %s, %u bytes\n", fileName.c_str(), (unsigned int) fileSize);
 
                             // Prompt user
                             uint16_t response;
@@ -1316,11 +1324,25 @@ void checkTCPConnections() {
                             }
                             else {
                                 tprint("Accepted\n");
+                                findClientByFd(it->fd)->second.fileSendingFd = open(findClientByFd(it->fd)->second.fileNameSending, O_RDONLY);
+                                
+                                char buf[50];
+                                int size = read(findClientByFd(it->fd)->second.fileSendingFd, 50);
+
+                                uint8_t FDM[68];
+                                *((uint16_t*)(FDM + 4)) = htons(FILE_DATA_MESSAGE);
+                                *((uint64_t*)(FDM + 6)) = htonll(findClientByFd(it->fd)->second.fileSendingOffset);
+                                *((uint32_t*)(FDM + 14)) = htonl(size);
+                                memcpy(FDM + 18, buf, size);
+
+                                writeEncryptedDataChunk(findClientByFd(it->fd)->second, FDM, 18 + size);
                             }
 
                             break;
                         }
                         case FILE_DATA_MESSAGE:{
+                            // findClientByFd(it->fd)->second.fileSendingOffset = 
+
                             break;
                         }
                         case ESTABLISH_COMM: {
@@ -1364,6 +1386,9 @@ void checkTCPConnections() {
                                 writeEncryptedDataChunk(clientMap.find(newClientName)->second, ECM + 4, 2);
 
                                 tprint("Accepting connection from: %s\n", newClientName.c_str());
+
+
+
 
                             }
 
@@ -1661,8 +1686,10 @@ void checkTCPConnections() {
 											}
 											case FILE_TRANFER_OFFER_MESSAGE:
 											{
-												findClientByFd(it->fd)->second.fileName = findClientByFd(it->fd)->second.userMsg;
-												break;
+												findClientByFd(it->fd)->second.fileNameReceiving = findClientByFd(it->fd)->second.userMsg;
+                                                tprint("File offer: %s, %u bytes\n", findClientByFd(it->fd)->second.fileNameReceiving.c_str(), 0);
+												
+                                                break;
 											}
 										}
 										findClientByFd(it->fd)->second.lastEncryptedMesssageType = 0;
