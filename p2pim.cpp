@@ -9,7 +9,7 @@
 
 
 enum Option {USERNAME, UDP_PORT, TCP_PORT, MIN_TIMEOUT, MAX_TIMEOUT, HOST, TA_UDP_PORT, AUTH_HOST};
-enum Command {CONNECT, LIST, DISCONNECT, GETLIST, HELP, SWITCH, AWAY, UNAWAY, BLOCK, UNBLOCK, EXIT, ENCRYPT};
+enum Command {CONNECT, LIST, DISCONNECT, GETLIST, HELP, SWITCH, AWAY, UNAWAY, BLOCK, UNBLOCK, EXIT, ENCRYPT, SENDFILE};
 enum AuthStatus {NONE, BAD, GOOD};
 
 struct Client {
@@ -49,7 +49,8 @@ static std::unordered_map<std::string, int> commandMap {
     {"\\connect", CONNECT}, {"\\c", CONNECT}, {"\\switch", SWITCH},
     {"\\list", LIST}, {"\\disconnect", DISCONNECT}, {"\\getlist", GETLIST},
     {"\\help", HELP}, {"\\away", AWAY}, {"\\unaway", UNAWAY},
-    {"\\block", BLOCK}, {"\\unblock", UNBLOCK}, {"\\exit", EXIT}, {"\\encrypt", ENCRYPT}
+    {"\\block", BLOCK}, {"\\unblock", UNBLOCK}, {"\\exit", EXIT}, {"\\encrypt", ENCRYPT},
+    {"\\sendf", SENDFILE}
 };
 
 
@@ -383,7 +384,7 @@ void SIGINT_handler(int signum) {
         }
 
         // Broadcast closing datagram
-        sendUDPMessage(CLOSING);
+        // sendUDPMessage(CLOSING);
         close(tcpSockFd);
         close(udpSockFd);
         tprint("Bye...\n");
@@ -417,7 +418,7 @@ void parseOptions(int argc, char** argv) {
                         optionMap[argv[i]] = -1;
                         username = argv[i + 1];
                         if(username.length() > 31) {
-                            fprintf(stderr, "Username should not be longer than 32 characters\n");
+                            fprintf(stderr, "Username should not be longer than 31 characters\n");
                             exit(1);
                         }
                         break;
@@ -1277,6 +1278,21 @@ void checkTCPConnections() {
 
 
                     switch(newType) {
+                        case FILE_TRANFER_OFFER_MESSAGE: {
+                            tprint("File offer!!!!!!!!\n");
+                            off_t fileSize = ntohll(*((uint64_t*)(encryptedDataChunk + 2)));
+
+                            std::string fileName = (char*)(encryptedDataChunk + 10);
+
+                            tprint("File offer: %s, %u bytes\n", fileName.c_str(), fileSize);
+                            break;
+                        }
+                        case FILE_TRANFER_RESPONSE_MESSAGE: {
+                            break;
+                        }
+                        case FILE_DATA_MESSAGE:{
+                            break;
+                        }
                         case ESTABLISH_COMM: {
                             std::string newClientName = (char*)(encryptedDataChunk + 2);
 
@@ -1556,7 +1572,7 @@ void checkTCPConnections() {
 										dprint("hostname is %s\n", newClient.hostName.c_str());
 									
 										newClient.tcpPort = ntohs(sieve16(client->replyUsrMsg));
-										//dprint("tcpPort is %d\n", newClient.tcpPort);
+										// dprint("tcpPort is %d\n", newClient.tcpPort);
 										client->replyUsrMsg.erase(client->replyUsrMsg.begin(),client->replyUsrMsg.begin()+2);
 
 										// get username
@@ -1687,8 +1703,36 @@ void checkSTDIN() {
                 std::string firstWord = message.substr(0, message.find_first_of(" ",0));
                 if(commandMap.find(firstWord) != commandMap.end()) {
                     switch(commandMap[firstWord]) {
+                        case SENDFILE: {
+                            std::string target;
+                            if(-1==getTarget(target))
+                            {
+                                tprint("No file specified.\n");
+                                break;
+                            }
+
+                            if(access(target.c_str(), F_OK) < 0) {
+                                die("File does not exits\n");
+                            }
+
+                            struct stat buf;
+                            if(stat(target.c_str(), &buf) < 0)
+                                die("Failed to stat file\n");
+
+                            off_t size = buf.st_size;
+
+                            uint8_t FOM[269];
+                            memset(FOM, 0, 269);
+                            *((uint16_t*)(FOM + 4)) = htons(FILE_TRANFER_OFFER_MESSAGE);
+                            *((uint64_t*)(FOM + 6)) = htonll(size);
+                            memcpy(FOM + 14, target.c_str(), target.length());
+
+                            writeEncryptedDataChunk(findClientByFd(currentConnection)->second, FOM, 14 + target.length() + 1);
+
+                            break;
+                        }
                         case CONNECT: {
-                           std::string target;
+                            std::string target;
                             if(-1==getTarget(target))
                             {
                                 tprint("No users specified.\n");
@@ -1974,6 +2018,7 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
         case REQUEST_USER_LIST: newType = REQUEST_USER_LIST_E; break;
         case REPLY_USER_LIST: newType = REPLY_USER_LIST_E; break;
         case DATA: newType = DATA_E; break;
+        case FILE_TRANFER_OFFER_MESSAGE: newType = type; break;
         default: newType = DUMMY_E; break;
     }
     tprint("Old type is %x\n", type);
@@ -1983,7 +2028,7 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
     strcpy((char*)encryptedDataChunk, "P2PI");
     *((uint16_t*)(encryptedDataChunk + 4)) = ntohs(ENCRYPTED_DATA_CHUNK_MESSAGE);
     *((uint16_t*)(raw_message + 4)) = ntohs(newType);
-    uint8_t bytesSent = 0;
+    uint64_t bytesSent = 0;
 	uint64_t seqNum;
     while(messageLength > bytesSent) //max length encryted message is 62.
     {
@@ -2026,6 +2071,7 @@ uint16_t processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encrypted
         case REQUEST_USER_LIST_E: newType = REQUEST_USER_LIST; break;
         case REPLY_USER_LIST_E: newType = REPLY_USER_LIST; break;
         case DATA_E: newType = DATA; break;
+        case FILE_TRANFER_OFFER_MESSAGE: newType = type; break;
 		case DUMMY_E: newType = DUMMY_E;
         default: newType = 0xFFFF; break;
     }
