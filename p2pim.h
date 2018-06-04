@@ -24,6 +24,7 @@
 #include <ifaddrs.h>
 #include <vector>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 
 #ifdef DEBUG
     #define dprint(string, ...) {clearline(); printf(string, ##__VA_ARGS__);}
