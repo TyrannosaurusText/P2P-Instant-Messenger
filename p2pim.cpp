@@ -47,6 +47,11 @@ struct Pair {
     std::string hostName;
     int portNum;
 };
+struct Triple {
+    std::string hostName;
+    int portNum;
+	int fd=0;
+};
 
 static std::unordered_map<std::string, int> optionMap {
     {"-u", USERNAME}, {"-up", UDP_PORT}, {"-tp", TCP_PORT},
@@ -86,6 +91,7 @@ socklen_t udpClientAddrLen, tcpClientAddrLen;
 std::vector<struct pollfd> pollFd(3);
 std::vector<struct Pair> unicastHosts;
 std::vector<struct Pair> fileTransferOffer;
+std::vector<struct Triple> unauthdRequest;
 
 int away = 0;
 
@@ -636,7 +642,6 @@ void connectToClient(std::string clientName) {
         dprint("New client name is %s\n", username.c_str());
 		if(encryptMode == 1)
 		{
-            tprint("Encrypting...\n");
 			ECMLen += 16;
 			*((uint64_t*)(ECM + 6 + username.length() + 1)) = htonll(public_key);
 			*((uint64_t*)(ECM + 6 + username.length() + 1 + 8)) = htonll(public_key_modulus);
@@ -1320,7 +1325,7 @@ void checkTCPConnections() {
                                 tprint("Rejected\n");
                             }
                             else {
-                                tprint("Accepted file transfer %s\n", findClientByFd(it->fd)->second.fileNameSending.c_str());
+                                tprint("Accepted file transfertransfer %s\n", findClientByFd(it->fd)->second.fileNameSending.c_str());
                                 findClientByFd(it->fd)->second.fileSendingFd = open(findClientByFd(it->fd)->second.fileNameSending.c_str(), O_RDONLY);
 
                                 char buf[50];
@@ -1394,17 +1399,27 @@ void checkTCPConnections() {
                             }
                             else {
                                 // Send accept comm message
-                                *((uint16_t*)(ECM + 4)) = htons(ACCEPT_COMM);
-                                clientMap.find(newClientName)->second.tcpSockFd = it->fd;
-                                tcpConnMap[it->fd] = newClientName;
+								if(clientMap.find(newClientName)->second.auth == GOOD){
+									*((uint16_t*)(ECM + 4)) = htons(ACCEPT_COMM);
+									clientMap.find(newClientName)->second.tcpSockFd = it->fd;
+									tcpConnMap[it->fd] = newClientName;
 
-                                // if(write(it->fd, ECM, ECMLen) < 0) {
-                                //     die("Failed to establish TCP connection.");
-                                // }
-                                writeEncryptedDataChunk(clientMap.find(newClientName)->second, ECM + 4, 2);
+									// if(write(it->fd, ECM, ECMLen) < 0) {
+									//     die("Failed to establish TCP connection.");
+									// }
+									writeEncryptedDataChunk(clientMap.find(newClientName)->second, ECM + 4, 2);
 
-                                tprint("Accepting connection from: %s\n", newClientName.c_str());
-
+									tprint("Accepting connection from: %s\n", newClientName.c_str());
+								}
+								else
+								{
+									struct Triple temp;
+									temp.hostName = newClientName;
+									temp.portNum = clientMap.find(newClientName)->second.tcpPort;
+									temp.fd = it->fd;
+									unauthdRequest.push_back(temp);
+									tprint("Unauthenticated user: %s is requesting communication over encrypt network. Accept? (yes/no)\n", newClientName.c_str());
+								}
 
 
 
@@ -1815,7 +1830,52 @@ void checkSTDIN() {
                 printf("%s>%s\n",username.c_str(), message.c_str());
 
                 std::string firstWord = message.substr(0, message.find_first_of(" ",0));
-				if(fileTransferOffer.size() > 0)
+				if(unauthdRequest.size() > 0){
+					auto triple = unauthdRequest.at(0); // hostName = FILENAME, portNum = TCPSOCKFILEDESCRIPTOR
+					for(int i = 0; i < firstWord.length(); i++)
+					{
+						firstWord[i] = std::tolower(firstWord[i]);
+					}
+					if(firstWord == "yes"|| firstWord == "no")
+					{
+						
+						// Prompt user
+						uint16_t response = (firstWord == "yes");
+
+						uint8_t ECM[6];
+						int ECMLen = 6;
+						
+                        if(firstWord == "yes") {
+							if(triple.fd != -1){
+								*((uint16_t*)(ECM + 4)) = htons(ACCEPT_COMM);
+								clientMap.find(triple.hostName)->second.tcpSockFd = triple.fd;
+								tcpConnMap[triple.fd] = triple.hostName;
+								writeEncryptedDataChunk(clientMap.find(triple.hostName)->second, ECM + 4, 2);
+
+								tprint("Accepting connection from: %s\n", triple.hostName.c_str());
+							}
+							else
+							{
+								connectToClient(triple.hostName);
+							}
+                        }
+						else{
+							*((uint16_t*)(ECM + 4)) = htons(USER_UNAVALIBLE);
+							clientMap.find(triple.hostName)->second.tcpSockFd = triple.fd;
+							tcpConnMap[triple.fd] = triple.hostName;
+							writeEncryptedDataChunk(clientMap.find(triple.hostName)->second, ECM + 4, 2);
+
+							tprint("Rejecting connection from: %s\n", triple.hostName.c_str());
+                        }
+						unauthdRequest.erase(unauthdRequest.begin(), unauthdRequest.begin() + 1);
+
+					}
+					else
+					{
+						tprint("Establish connection with unauthenticated user %s? (yes/no)\n", triple.hostName.c_str());
+                    }
+				}
+				else if(fileTransferOffer.size() > 0)
 				{
 					auto offer= fileTransferOffer.at(0); // hostName = FILENAME, portNum = TCPSOCKFILEDESCRIPTOR
 					for(int i = 0; i < firstWord.length(); i++)
@@ -1850,7 +1910,6 @@ void checkSTDIN() {
 					else
 					{
 					    tprint("User %s requesting file transfer. File Name: %s (yes/no)\n", findClientByFd(offer.portNum)->second.username.c_str(), offer.hostName.c_str());
-					    
                     }
 				}
 				else{
@@ -1898,7 +1957,18 @@ void checkSTDIN() {
 								if( client != clientMap.end() ) {
 									client->second.block = 0;
 									if(client->second.tcpSockFd == -1) {
-										connectToClient(target);
+										if(client->second.auth == GOOD){
+											connectToClient(target);
+										}else
+										{
+											tprint("User %s is unauthenticated. Connect anyways? {yes/no}")
+											struct Triple temp;
+											temp.hostName = target;
+											temp.portNum = client->second.tcpPort;
+											temp.fd = -1;
+											unauthdRequest.push_back(temp);
+											break;
+										}
 										currentConnection = client->second.tcpSockFd;
 									}
 									else{
@@ -1908,7 +1978,7 @@ void checkSTDIN() {
 								}
 								else
 									tprint("No user '%s' found.\n", target.c_str());
-
+							
 								break;
 							}
 							case GETLIST: {
@@ -2063,14 +2133,9 @@ void checkSTDIN() {
 									encryptMode = 0;
 									tprint("Encryption off.\n");
 								}
-								else if( auth == GOOD )
-								{
+								else{
 									encryptMode = 1;
 									tprint("Encryption on.\n");
-								}
-								else
-								{
-									tprint("Authentication Required.\n");
 								}
 								break;
 							}
