@@ -1009,7 +1009,11 @@ void checkTCPConnections() {
                     clientMap.find(newClientName)->second.public_key = client_public_key;
                     tprint("key is %lu, modulus is %lu\n", client_public_key, client_public_key_modulus);
 
-
+					if(client_public_key != findClientByFd(it->fd)->second.public_key || client_public_key_modulus != findClientByFd(it->fd)->second.public_key_modulus)
+					{
+						tprint("Connecting to unauthenticated user %s\n", newClientName);
+					}
+						
                     uint8_t ECM[22];
                     int ECMLen = type == ESTABLISH_COMM ? 6 : 22;
                     memcpy(ECM, "P2PI", 4);
