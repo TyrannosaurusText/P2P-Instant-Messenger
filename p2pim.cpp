@@ -36,8 +36,8 @@ struct Client {
     uint64_t fileSendingOffset = 0; //file to send
     uint64_t fileReceivingSize = 0; //file to receive
     uint64_t fileSendingSize = 0; //file to send
-    int fileSendingFd = 0;
-    int fileReceivingFd = 0;
+    int fileSendingFd = -1;
+    int fileReceivingFd = -1;
 	std::vector <uint8_t> replyUsrMsg;
 	uint32_t entryCount = 0;
 	bool acceptingFileTransferFrom = 0;
@@ -672,6 +672,12 @@ void connectToClient(std::string clientName) {
 
 
 std::unordered_map<std::string, struct Client>::iterator findClientByFd(int fd) {
+    if(tcpConnMap.find(fd) == tcpConnMap.end()) {
+        tprint("Fuck\n");
+    }
+    if(clientMap.find(tcpConnMap.find(fd)->second) == clientMap.end()) {
+        tprint("Fuck?\n");
+    }
     return clientMap.find(tcpConnMap.find(fd)->second);
 }
 
@@ -1379,7 +1385,7 @@ void checkTCPConnections() {
 
                             if(dataSize < 50) {
                                 close(findClientByFd(it->fd)->second.fileReceivingFd);
-                                findClientByFd(it->fd)->second.fileReceivingFd = 0;
+                                findClientByFd(it->fd)->second.fileReceivingFd = -1;
                                 findClientByFd(it->fd)->second.fileReceivingOffset = 0;
                                 findClientByFd(it->fd)->second.fileNameReceiving = "";
                                 findClientByFd(it->fd)->second.fileReceivingSize = 0;
@@ -1781,6 +1787,12 @@ void checkTCPConnections() {
                             pfd.events = POLLIN;
                         }
                     }
+
+                    findClientByFd(it->fd)->second.fileNameSending = "";
+                    close(findClientByFd(it->fd)->second.fileSendingFd);
+                    findClientByFd(it->fd)->second.fileSendingSize = 0;
+                    findClientByFd(it->fd)->second.fileSendingOffset = 0;
+                    findClientByFd(it->fd)->second.fileSendingFd = -1;
                 }
             }
         }
@@ -1888,8 +1900,13 @@ void checkSTDIN() {
 					if(commandMap.find(firstWord) != commandMap.end()) {
 						switch(commandMap[firstWord]) {
 							case SENDFILE: {
+                                std::string user;
+                                if(-1 == getTarget(user)) {
+                                    tprint("No user specified.\n");
+                                    break;
+                                } 
 								std::string target;
-								if(-1==getTarget(target))
+								if(-1 == getNextTarget(target))
 								{
 									tprint("No file specified.\n");
 									break;
@@ -1903,10 +1920,70 @@ void checkSTDIN() {
 								if(stat(target.c_str(), &buf) < 0)
 									die("Failed to stat file\n");
 
+
+                                std::unordered_map<std::string, struct Client>::iterator it = clientMap.find(user);
+                                if(it != clientMap.end()) {
+                                    // Resolve dns
+                                    struct hostent* remoteHostEntry = gethostbyname(it->second.hostName.c_str());
+                                    if(!remoteHostEntry)
+                                        die("Failed to resolve host");
+
+                                    struct in_addr remoteAddr;
+                                    memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
+
+                                    struct sockaddr_in client2ConnetAddr;
+                                    client2ConnetAddr.sin_family = AF_INET;
+                                    client2ConnetAddr.sin_addr = remoteAddr;
+                                    client2ConnetAddr.sin_port = htons(it->second.tcpPort);
+
+                                    int newConn = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+                                    if(0 > connect(newConn, (struct sockaddr*)&client2ConnetAddr, sizeof(client2ConnetAddr)))
+                                        die("Failed to connect to host.");
+
+                                    dprint("CONNECTED TO NEW HOST\n");
+
+                                    // // Send ESTABLISH COMMUNICATION MSG
+                                    // uint8_t ECM[55];
+                                    // int ECMLen = 4 + 2 + username.length() + 1;
+
+                                    // memset(ECM, 0, ECMLen);
+                                    // memcpy(ECM, "P2PI", 4);
+                                    // *((uint16_t*)(ECM + 4)) = htons((encryptMode == 0 ? ESTABLISH_COMM : ESTABLISH_ENCRYPTED_COMM));
+                                    // memcpy((uint16_t*)(ECM + 6), username.c_str(), username.length());
+                                    // dprint("New client name is %s\n", username.c_str());
+                                    // if(encryptMode == 1)
+                                    // {
+                                    //     tprint("Encrypting...\n");
+                                    //     ECMLen += 16;
+                                    //     *((uint64_t*)(ECM + 6 + username.length() + 1)) = htonll(public_key);
+                                    //     *((uint64_t*)(ECM + 6 + username.length() + 1 + 8)) = htonll(public_key_modulus);
+                                    //     clientMap.find(clientName)->second.connectionType = 1;
+                                    //     clientMap.find(clientName)->second.which = SENDER;
+
+                                    // }
+                                    // if(write(newConn, ECM, ECMLen) < 0)
+                                    //     die("Failed to send ESTABLISH COMM message.");
+
+                                    // Record the newly connected tcp socket
+                                    clientMap.find(user)->second.tcpSockFd = newConn;
+
+                                    tcpConnMap[newConn] = user;
+
+                                    // Push fd to pollfd vector
+                                    struct pollfd newPollFd;
+                                    newPollFd.fd = newConn;
+                                    newPollFd.events = POLLIN;
+                                    pollFd.push_back(newPollFd);
+                                }
+                                else {
+                                    tprint("User %s not found\n", user.c_str());
+                                    break;
+                                }
+
 								uint64_t size = buf.st_size;
 
-                                findClientByFd(currentConnection)->second.fileNameSending = target;
-                                findClientByFd(currentConnection)->second.fileSendingSize = size;
+                                it->second.fileNameSending = target;
+                                it->second.fileSendingSize = size;
 
 								uint8_t FOM[269];
 								memset(FOM, 0, 269);
@@ -1914,7 +1991,7 @@ void checkSTDIN() {
 								*((uint64_t*)(FOM + 6)) = htonll(size);
 								memcpy(FOM + 14, target.c_str(), target.length());
 
-								writeEncryptedDataChunk(findClientByFd(currentConnection)->second, FOM, 14 + target.length() + 1);
+								writeEncryptedDataChunk(it->second, FOM, 14 + target.length() + 1);
 
 								break;
 							}
@@ -2095,14 +2172,10 @@ void checkSTDIN() {
 									encryptMode = 0;
 									tprint("Encryption off.\n");
 								}
-								else if( auth == GOOD )
+								else
 								{
 									encryptMode = 1;
 									tprint("Encryption on.\n");
-								}
-								else
-								{
-									tprint("Authentication Required.\n");
 								}
 								break;
 							}
@@ -2181,11 +2254,37 @@ int getTarget(std::string &target)
     }
     target = message.substr(pos+1);
     if( (pos = target.find(" ")) != std::string::npos) { //loook for next ' '
-        target = message.substr(target.length()+1, pos);
+        target = target.substr(0, pos);
     }
     if(target.length() < 1) { // string is ''
         return -1;
     }
+
+    return 0;
+}
+
+int getNextTarget(std::string &target)
+{
+    target="";
+    int pos = 0;
+    if( (pos = message.find(" ")) == std::string::npos) { //loook for first ' '
+        return -1;
+    }
+    target = message.substr(pos+1);
+    if( (pos = target.find(" ")) == std::string::npos) { //loook for next ' '
+        return -1;
+    }
+    target = target.substr(pos + 1);
+    
+    if( (pos = target.find(" ")) != std::string::npos) { //loook for next ' '
+        target = target.substr(0, pos);
+    }
+
+    if(target.length() < 1) { // string is ''
+        return -1;
+    }
+
+    return 0;
 }
 
 void clearline() {
