@@ -22,9 +22,11 @@
 #include <cctype>
 #include <signal.h>
 #include <ifaddrs.h>
+#include <locale.h>
 #include <vector>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 
 #ifdef DEBUG
     #define dprint(string, ...) {clearline(); printf(string, ##__VA_ARGS__);}
