@@ -991,7 +991,7 @@ void checkTCPConnections() {
                     tprint("key is %lu, modulus is %lu\n", client_public_key, client_public_key_modulus);
 
 					if(client_public_key != findClientByFd(it->fd)->second.public_key || client_public_key_modulus != findClientByFd(it->fd)->second.public_key_modulus)
-	`				{
+					{
 						tprint("Connecting to unauthenticated user %s\n", newClientName);
 					}
 						
@@ -2142,18 +2142,20 @@ void generateList() {
 
 int getTarget(std::string &target)
 {
-    target="";
-    int pos = 0;
-    if( (pos = message.find(" ")) == std::string::npos) { //loook for first ' '
-        return -1;
-    }
-    target = message.substr(pos+1);
-    if( (pos = target.find(" ")) != std::string::npos) { //loook for next ' '
-        target = message.substr(target.length()+1, pos);
-    }
-    if(target.length() < 1) { // string is ''
-        return -1;
-    }
+    target=message.c_str();
+    int pos = target.find_first_of(" ");
+    if(pos < 0) return -1; 
+	target.erase(0, pos);
+	pos = target.find_first_not_of(" ");
+	if(pos < 0) return -1;
+	target.erase(0, pos);
+	pos = target.find_first_of(" ");
+    if(pos > 0)
+	{
+		target = target.substr(0,pos);
+	}
+    
+	return 0;
 }
 
 void clearline() {
