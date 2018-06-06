@@ -1009,7 +1009,7 @@ void checkTCPConnections() {
                     clientMap.find(newClientName)->second.public_key = client_public_key;
                     tprint("key is %lu, modulus is %lu\n", client_public_key, client_public_key_modulus);
 
-					if(client_public_key != findClientByFd(it->fd)->second.public_key || client_public_key_modulus != findClientByFd(it->fd)->second.public_key_modulus)
+					if(client_public_key != clientMap.find(newClientName)->second.public_key || client_public_key_modulus != clientMap.find(newClientName)->second.public_key_modulus)
 					{
 						tprint("Connecting to unauthenticated user %s\n", newClientName);
 					}
@@ -1905,6 +1905,10 @@ void checkSTDIN() {
 						switch(commandMap[firstWord]) {
 							case SENDFILE: {
                                 std::string user;
+                                if(encryptMode != 1) {
+                                    tprint("Encryption mode needs to be turned on\n");
+                                    break;
+                                }
                                 if(-1 == getTarget(user)) {
                                     tprint("No user specified.\n");
                                     break;
@@ -1917,7 +1921,8 @@ void checkSTDIN() {
 								}
 
 								if(access(target.c_str(), F_OK) < 0) {
-									die("File does not exits\n");
+									tprint("File does not exits\n");
+                                    break;
 								}
 
 								struct stat buf;
@@ -1927,57 +1932,67 @@ void checkSTDIN() {
 
                                 std::unordered_map<std::string, struct Client>::iterator it = clientMap.find(user);
                                 if(it != clientMap.end()) {
-                                    // Resolve dns
-                                    struct hostent* remoteHostEntry = gethostbyname(it->second.hostName.c_str());
-                                    if(!remoteHostEntry)
-                                        die("Failed to resolve host");
+                                    if(it->second.tcpSockFd == -1) {
+                                        tprint("No existing connection to user %s\n", user.c_str());
+                                        break;
+                                    }
 
-                                    struct in_addr remoteAddr;
-                                    memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
+                                    if(it->second.fileSendingFd != -1) {
+                                        tprint("There is a file currently in transfer\n");
+                                        break;
+                                    }
 
-                                    struct sockaddr_in client2ConnetAddr;
-                                    client2ConnetAddr.sin_family = AF_INET;
-                                    client2ConnetAddr.sin_addr = remoteAddr;
-                                    client2ConnetAddr.sin_port = htons(it->second.tcpPort);
+                                    // // Resolve dns
+                                    // struct hostent* remoteHostEntry = gethostbyname(it->second.hostName.c_str());
+                                    // if(!remoteHostEntry)
+                                    //     die("Failed to resolve host");
 
-                                    int newConn = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-                                    if(0 > connect(newConn, (struct sockaddr*)&client2ConnetAddr, sizeof(client2ConnetAddr)))
-                                        die("Failed to connect to host.");
+                                    // struct in_addr remoteAddr;
+                                    // memcpy(&remoteAddr, remoteHostEntry->h_addr, remoteHostEntry->h_length);
 
-                                    dprint("CONNECTED TO NEW HOST\n");
+                                    // struct sockaddr_in client2ConnetAddr;
+                                    // client2ConnetAddr.sin_family = AF_INET;
+                                    // client2ConnetAddr.sin_addr = remoteAddr;
+                                    // client2ConnetAddr.sin_port = htons(it->second.tcpPort);
 
-                                    // // Send ESTABLISH COMMUNICATION MSG
-                                    // uint8_t ECM[55];
-                                    // int ECMLen = 4 + 2 + username.length() + 1;
+                                    // int newConn = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+                                    // if(0 > connect(newConn, (struct sockaddr*)&client2ConnetAddr, sizeof(client2ConnetAddr)))
+                                    //     die("Failed to connect to host.");
 
-                                    // memset(ECM, 0, ECMLen);
-                                    // memcpy(ECM, "P2PI", 4);
-                                    // *((uint16_t*)(ECM + 4)) = htons((encryptMode == 0 ? ESTABLISH_COMM : ESTABLISH_ENCRYPTED_COMM));
-                                    // memcpy((uint16_t*)(ECM + 6), username.c_str(), username.length());
-                                    // dprint("New client name is %s\n", username.c_str());
-                                    // if(encryptMode == 1)
-                                    // {
-                                    //     tprint("Encrypting...\n");
-                                    //     ECMLen += 16;
-                                    //     *((uint64_t*)(ECM + 6 + username.length() + 1)) = htonll(public_key);
-                                    //     *((uint64_t*)(ECM + 6 + username.length() + 1 + 8)) = htonll(public_key_modulus);
-                                    //     clientMap.find(clientName)->second.connectionType = 1;
-                                    //     clientMap.find(clientName)->second.which = SENDER;
+                                    // tprint("CONNECTED TO NEW HOST\n");
 
-                                    // }
-                                    // if(write(newConn, ECM, ECMLen) < 0)
-                                    //     die("Failed to send ESTABLISH COMM message.");
+                                    // // // Send ESTABLISH COMMUNICATION MSG
+                                    // // uint8_t ECM[55];
+                                    // // int ECMLen = 4 + 2 + username.length() + 1;
 
-                                    // Record the newly connected tcp socket
-                                    clientMap.find(user)->second.tcpSockFd = newConn;
+                                    // // memset(ECM, 0, ECMLen);
+                                    // // memcpy(ECM, "P2PI", 4);
+                                    // // *((uint16_t*)(ECM + 4)) = htons((encryptMode == 0 ? ESTABLISH_COMM : ESTABLISH_ENCRYPTED_COMM));
+                                    // // memcpy((uint16_t*)(ECM + 6), username.c_str(), username.length());
+                                    // // dprint("New client name is %s\n", username.c_str());
+                                    // // if(encryptMode == 1)
+                                    // // {
+                                    // //     tprint("Encrypting...\n");
+                                    // //     ECMLen += 16;
+                                    // //     *((uint64_t*)(ECM + 6 + username.length() + 1)) = htonll(public_key);
+                                    // //     *((uint64_t*)(ECM + 6 + username.length() + 1 + 8)) = htonll(public_key_modulus);
+                                    // //     clientMap.find(clientName)->second.connectionType = 1;
+                                    // //     clientMap.find(clientName)->second.which = SENDER;
 
-                                    tcpConnMap[newConn] = user;
+                                    // // }
+                                    // // if(write(newConn, ECM, ECMLen) < 0)
+                                    // //     die("Failed to send ESTABLISH COMM message.");
 
-                                    // Push fd to pollfd vector
-                                    struct pollfd newPollFd;
-                                    newPollFd.fd = newConn;
-                                    newPollFd.events = POLLIN;
-                                    pollFd.push_back(newPollFd);
+                                    // // Record the newly connected tcp socket
+                                    // clientMap.find(user)->second.tcpSockFd = newConn;
+
+                                    // tcpConnMap[newConn] = user;
+
+                                    // // Push fd to pollfd vector
+                                    // struct pollfd newPollFd;
+                                    // newPollFd.fd = newConn;
+                                    // newPollFd.events = POLLIN;
+                                    // pollFd.push_back(newPollFd);
                                 }
                                 else {
                                     tprint("User %s not found\n", user.c_str());
@@ -1988,6 +2003,7 @@ void checkSTDIN() {
 
                                 it->second.fileNameSending = target;
                                 it->second.fileSendingSize = size;
+                                it->second.fileSendingOffset = 0;
 
 								uint8_t FOM[269];
 								memset(FOM, 0, 269);
