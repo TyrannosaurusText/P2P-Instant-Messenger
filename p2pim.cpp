@@ -188,7 +188,7 @@ int main(int argc, char** argv) {
         fflush(STDIN_FILENO);
         // Wait for reply message
         gettimeofday(&start, NULL);
-        int rc = poll(pollFd.data(), pollFd.size(), currTimeout>dummy_interval?dummy_interval:currTimeout);
+        int rc = poll(pollFd.data(), pollFd.size(), currTimeout > dummy_interval ? dummy_interval : currTimeout);
 
         gettimeofday(&end, NULL);
         timePassed = ((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec) / 1000;
@@ -198,22 +198,23 @@ int main(int argc, char** argv) {
 		// {
 		// 	auto fd = it.first;
         dummy_interval -= timePassed;
-        if(dummy_interval <= 0 && rc == 0 ){
-            dummy_interval = GenerateRandomValue() % 5000+5000;
+        if(dummy_interval <= 0 && rc == 0){
+            dummy_interval = GenerateRandomValue() % 5000 + 5000;
         
             if(!tcpConnMap.empty()) {
                 uint16_t index = GenerateRandomValue() % tcpConnMap.size();
 
-                for (auto client: tcpConnMap)
+                for(auto client: tcpConnMap)
     			{
-                    if(index--==0)
+                    if(index-- == 0)
                     {
     				    tprint("sending dummy to tcp sock %d\n", clientMap.find(client.second)->second.tcpSockFd);
     				    writeEncryptedDataChunk(clientMap.find(client.second)->second, dummy, 6);
     				}
     			}
             }
-        } else
+        }
+        else
         if(0 == rc) {
             clearline();
             dprint("Next iteration at %d\n", currTimeout);
@@ -789,7 +790,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                     // map already
 
                     // Check if packet is from another host
-                    if(memcmp(incomingUDPMsg + 6, outgoingUDPMsg + 6, outgoingUDPMsgLen - 6)) {
+                    if(username_a != username) {
                         // Check if host is already discovered
                         if(clientMap.find(username_a) == clientMap.end()) {
                             tprint("\r-----NEW HOST: %s-----\n", username_a.c_str());
@@ -1894,7 +1895,12 @@ void checkSTDIN() {
                                 } 
 								if(-1 == getNextTarget(user))
 								{
-									user = tcpConnMap.find(currentConnection)->second;
+                                    if(currentConnection == -1) {
+                                        tprint("No current connection\n");
+                                        break;
+                                    }
+									
+                                    user = tcpConnMap.find(currentConnection)->second;
 								}
 
                                 tprint("user is %s\n", user.c_str());
@@ -1916,7 +1922,7 @@ void checkSTDIN() {
                                         break;
                                     }
 
-                                    if(it->second.fileSendingFd != -1) {
+                                    if(it->second.fileNameSending != "") {
                                         tprint("There is a file currently in transfer\n");
                                         break;
                                     }
@@ -2376,7 +2382,7 @@ uint16_t processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encrypted
 void login_prompt()
 {
     std::string password = "";
-    tprint("Enter password for %s>", username.c_str());
+    tprint("Enter password for %s> ", username.c_str());
     fflush(STDIN_FILENO);
     std::string passwordmask = "";
     while(1){
@@ -2412,9 +2418,8 @@ void login_prompt()
                 password += buffer[0];
                 passwordmask += '*';
             }
-            else //(buffer[0] == '\n')
+            else if(password.length() > 0)//(buffer[0] == '\n')
             {
-                dprint("Exposing your password: %s\n", password.c_str());
                 tprint("Logging in...\n");
                 std::string str = username + ":" + password;
                 StringToPublicNED(str.c_str(), public_key_modulus, public_key, private_key);
@@ -2430,7 +2435,7 @@ void login_prompt()
         else
             connName = tcpConnMap.find(currentConnection)->second;
 
-        printf("Enter password for %s>%s",username.c_str(), passwordmask.c_str());
+        printf("Enter password for %s> %s",username.c_str(), passwordmask.c_str());
 
         // printf("\033[0C");
         fflush(STDIN_FILENO);
@@ -2515,11 +2520,15 @@ void sendReqAuthMessage(std::string name) {
 
 
 void checkAuth() {
-    if(auth == NONE)
+    if(auth == NONE){ 
+        tprint("send auth for user\n");
         sendReqAuthMessage(username);
+    }
 
     for(auto i : clientMap) {
         if(i.second.auth == NONE) {
+            tprint("send auth for others\n");
+
             sendReqAuthMessage(i.second.username);
         }
     }
