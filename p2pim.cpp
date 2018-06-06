@@ -921,7 +921,7 @@ void checkTCPConnections() {
     for(auto it = pollFd.begin() + 3; it != pollFd.end();) {
         // dprint("Checking %d at %d\n", i, pollFd[i].fd);
         if(it->revents & POLLIN) {     
-            tprint("%d has something, size %lu\n", it->fd, pollFd.size());
+            // tprint("%d has something, size %lu\n", it->fd, pollFd.size());
             uint8_t incomingTCPMsg[518];
             memset(incomingTCPMsg, 0, 518);
             int recvLen, j = 0;
@@ -931,9 +931,9 @@ void checkTCPConnections() {
                 j += recvLen;
             }
 
-            for(int i = 0; i < 6; i++) {
-                tprint("%u, %c\n", incomingTCPMsg[i]);
-            }
+            // for(int i = 0; i < 6; i++) {
+            //     tprint("%u, %c\n", incomingTCPMsg[i]);
+            // }
 
             // Invalid signature, close connection
             if(memcmp("P2PI", incomingTCPMsg, 4) != 0 &&
@@ -1093,11 +1093,11 @@ void checkTCPConnections() {
                         // PublicEncryptDecrypt(low32b, P2PI_TRUST_E, P2PI_TRUST_N);
                         PublicEncryptDecrypt(low32b, private_key, public_key_modulus);
 
-                        tprint("ACCEPT_ENCRYPTED_COMM low32b %u\n", (uint32_t)low32b);
-                        tprint("ACCEPT_ENCRYPTED_COMM high32b %u\n", (uint32_t)high32b);
+                        // tprint("ACCEPT_ENCRYPTED_COMM low32b %u\n", (uint32_t)low32b);
+                        // tprint("ACCEPT_ENCRYPTED_COMM high32b %u\n", (uint32_t)high32b);
 
                         findClientByFd(it->fd)->second.sessionKey = (high32b << 32) + low32b;
-                        tprint("sessionkey is %lu\n", findClientByFd(it->fd)->second.sessionKey);
+                        // tprint("sessionkey is %lu\n", findClientByFd(it->fd)->second.sessionKey);
 
                     }
                     break;
@@ -1118,7 +1118,6 @@ void checkTCPConnections() {
                 }
                 case REQUEST_USER_LIST: {
                     tprint("User list requested\n");
-                    dprint("hi\n");
                     uint8_t ECM[10];
                     memcpy(ECM, "P2PI", 4);
                     *((uint16_t*)(ECM + 4)) = htons(REPLY_USER_LIST);
@@ -1243,29 +1242,6 @@ void checkTCPConnections() {
                     }
                     dprint("recvLen is %d\n", j);
 
-
-                    // while(1) {
-                    //     tprint("Hmmmmm\n");
-                    //     recvLen = read(it->fd, dataMsg, 512);
-                    //     dprint("recvLen %d\n", recvLen);
-                    //     for(int l = 0; l < recvLen; l++) {
-                    //         dprint("%c\n", dataMsg[l]);
-                    //     }
-                    //     if(dataMsg[recvLen - 1] == '\0')
-                    //         break;
-
-                    //     // j++;
-
-                    //     if(recvLen == 512) {
-                    //         dataMsg[512] = '\0';
-                    //         dataBuffer += dataMsg;
-                    //         dprint("current buffer %s\n", dataBuffer.c_str());
-                    //         // j = 0;
-                    //     }
-
-                    // }
-                    // dprint("recvLen is %d\n", recvLen);
-
                     dataBuffer += dataMsg;
 
                     dprint("User %s message.\n", tcpConnMap.find(it->fd)->second.c_str());
@@ -1310,18 +1286,15 @@ void checkTCPConnections() {
                     // for(int i = 0; i < 64; i++) {
                     //     tprint("%d\t%c\t%lx\n", encryptedDataChunk[i], encryptedDataChunk[i]);
                     // } 
-					tprint("New sock FD is: %d\n", it->fd);
+					// tprint("New sock FD is: %d\n", it->fd);
                     int newType = processEncryptedDataChunk(findClientByFd(it->fd)->second, encryptedDataChunk);
 
-                    tprint("new type is %lx\n", (long unsigned int)newType);
+                    // tprint("new type is %lx\n", (long unsigned int)newType);
 
 
                     switch(newType) {
                         case FILE_TRANFER_OFFER_MESSAGE: {
-                            tprint("File offer!!!!!!!!\n");
                             findClientByFd(it->fd)->second.fileReceivingSize = ntohll(*((uint64_t*)(encryptedDataChunk + 2)));
-
-                            // std::string fileName = (char*)(encryptedDataChunk + 10);
 
                             uint8_t fileNameArr[55];
                             memcpy(fileNameArr, encryptedDataChunk + 10, 54);
@@ -1355,7 +1328,7 @@ void checkTCPConnections() {
                                 char buf[51];
                                 int size = read(findClientByFd(it->fd)->second.fileSendingFd, buf, 50);
                                 buf[size] = 0;
-                                tprint("File content: %s\n", buf);
+                                // tprint("File content: %s\n", buf);
 
                                 uint8_t FDM[68];
                                 *((uint16_t*)(FDM + 4)) = htons(FILE_DATA_MESSAGE);
@@ -1383,7 +1356,7 @@ void checkTCPConnections() {
                             char msg[51];
                             memcpy(msg, encryptedDataChunk + 14, dataSize);
                             msg[dataSize] = 0;
-                            tprint("File data is %s\n", msg);
+                            // tprint("File data is %s\n", msg);
 
                             write(findClientByFd(it->fd)->second.fileReceivingFd, encryptedDataChunk + 14, dataSize);
 
@@ -1507,7 +1480,7 @@ void checkTCPConnections() {
                                 i++;
                             }
 							writeEncryptedDataChunk(findClientByFd(it->fd)->second, userEntrySTR.data(), userEntrySTR.size());
-							 for(int i = 0; i < userEntrySTR.size(); i++)
+							for(int i = 0; i < userEntrySTR.size(); i++)
 							{
 								tprint("%d, %d %c\n",i, userEntrySTR.at(i), userEntrySTR.at(i));
 							}
@@ -1527,7 +1500,7 @@ void checkTCPConnections() {
 							tprint("Entry Count is: %d \n", client->entryCount);
 							client->replyUsrMsg.erase(client->replyUsrMsg.begin(),client->replyUsrMsg.begin()+4);
  							for(int k = 0; k < client->entryCount; k++) {
-								 for(int i = 0; i < client->replyUsrMsg.size(); i++)
+								for(int i = 0; i < client->replyUsrMsg.size(); i++)
 								{
 									tprint("%d: %c %d \n", i, client->replyUsrMsg[i], client->replyUsrMsg[i]);
 								}
@@ -1904,21 +1877,23 @@ void checkSTDIN() {
 					if(commandMap.find(firstWord) != commandMap.end()) {
 						switch(commandMap[firstWord]) {
 							case SENDFILE: {
-                                std::string user;
+                                std::string user = "";
+                                std::string target;
+
                                 if(encryptMode != 1) {
                                     tprint("Encryption mode needs to be turned on\n");
                                     break;
                                 }
-                                if(-1 == getTarget(user)) {
-                                    tprint("No user specified.\n");
+                                if(-1 == getTarget(target)) {
+                                    tprint("No file specified.\n");
                                     break;
                                 } 
-								std::string target;
-								if(-1 == getNextTarget(target))
+								if(-1 == getNextTarget(user))
 								{
-									tprint("No file specified.\n");
-									break;
+									user = tcpConnMap.find(currentConnection)->second;
 								}
+
+                                tprint("user is %s\n", user.c_str());
 
 								if(access(target.c_str(), F_OK) < 0) {
 									tprint("File does not exits\n");
@@ -2349,7 +2324,7 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
             (64 < messageLength - 4 - bytesSent? 64 : messageLength - 4 - bytesSent));
 
         bytesSent += 64;
-        tprint("Encrypting with seq %lu\n", seqNum);
+        // tprint("Encrypting with seq %lu\n", seqNum);
         //tprint("Encrypting bytes %lu of %lu\n", (unsigned long)bytesSent, (unsigned long)messageLength);
  		
         PrivateEncryptDecrypt(encryptedDataChunk + 6, 64, seqNum);
@@ -2370,7 +2345,7 @@ uint16_t processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encrypted
 {
 	// tprint("session key is: %lu\n", clientInfo.seqNum);
 	uint64_t seqNum = sessionKeyUpdate(clientInfo, RECEIVER);
-    tprint("Decrypting with seq %lu\n", seqNum);
+    // tprint("Decrypting with seq %lu\n", seqNum);
     PrivateEncryptDecrypt(encryptedDataChunk, 64, seqNum);
     uint16_t type = getType(encryptedDataChunk - 4); //"P2PI0x000D(TYPE)";
     //tprint("type is %lx\n", (long unsigned int)type);
