@@ -198,7 +198,7 @@ int main(int argc, char** argv) {
 		// {
 		// 	auto fd = it.first;
         dummy_interval -= timePassed;
-        if(dummy_interval <= 0 & rc == 0 ){
+        if(dummy_interval <= 0 && rc == 0 ){
             dummy_interval = GenerateRandomValue() % 5000+5000;
         
             if(!tcpConnMap.empty()) {
