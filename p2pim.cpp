@@ -928,10 +928,9 @@ void checkTCPConnections() {
                 j += recvLen;
             }
 
-            // for(int i = 0; i < 6; i++) {
-            //     tprint("%u, %c\n", incomingTCPMsg[i]);
-            // }
-
+            for(int i = 0; i < 6; i++) {
+                tprint("%u, %c\n", incomingTCPMsg[i]);
+            }
             // Invalid signature, close connection
             if(memcmp("P2PI", incomingTCPMsg, 4) != 0 &&
                 (findClientByFd(it->fd) != clientMap.end() &&
@@ -1337,11 +1336,19 @@ void checkTCPConnections() {
 
                                 writeEncryptedDataChunk(findClientByFd(it->fd)->second, FDM, 18 + size);
 
+								if(findClientByFd(it->fd)->second.fileSendingOffset < findClientByFd(it->fd)->second.fileSendingSize)
                                 for(auto& pfd : pollFd) {
                                     if(pfd.fd == it->fd) {
                                         pfd.events = POLLIN | POLLOUT;
                                     }
                                 }
+								else{
+									findClientByFd(it->fd)->second.fileNameSending = "";
+									close(findClientByFd(it->fd)->second.fileSendingFd);
+									findClientByFd(it->fd)->second.fileSendingSize = 0;
+									findClientByFd(it->fd)->second.fileSendingOffset = 0;
+									findClientByFd(it->fd)->second.fileSendingFd = -1;
+								}
                             }
 
                             break;
@@ -1738,7 +1745,7 @@ void checkTCPConnections() {
             }
         }
         if(it->revents & POLLOUT) {
-            // tprint("POLLOUT at port %d!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n", it->fd);
+            //tprint("POLLOUT at port %d!\n", it->fd);
             if(findClientByFd(it->fd)->second.fileSendingOffset != findClientByFd(it->fd)->second.fileSendingSize) {
                 char buf[51];
                 int size = read(findClientByFd(it->fd)->second.fileSendingFd, buf, 50);
@@ -1754,7 +1761,7 @@ void checkTCPConnections() {
                 memcpy(FDM + 18, buf, size);
 
                 writeEncryptedDataChunk(findClientByFd(it->fd)->second, FDM, 18 + size);
-
+				tprint("offset : %lu, size: %lu", findClientByFd(it->fd)->second.fileSendingOffset, findClientByFd(it->fd)->second.fileSendingSize);
                 if(findClientByFd(it->fd)->second.fileSendingOffset == findClientByFd(it->fd)->second.fileSendingSize) {
                     for(auto& pfd : pollFd) {
                         if(pfd.fd == it->fd) {
