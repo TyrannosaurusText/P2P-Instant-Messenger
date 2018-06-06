@@ -188,7 +188,7 @@ int main(int argc, char** argv) {
         fflush(STDIN_FILENO);
         // Wait for reply message
         gettimeofday(&start, NULL);
-        int rc = poll(pollFd.data(), pollFd.size(), currTimeout);
+        int rc = poll(pollFd.data(), pollFd.size(), currTimeout>dummy_interval?dummy_interval:currTimeout);
 
         gettimeofday(&end, NULL);
         timePassed = ((end.tv_sec - start.tv_sec) * 1000000 + end.tv_usec - start.tv_usec) / 1000;
@@ -198,7 +198,7 @@ int main(int argc, char** argv) {
 		// {
 		// 	auto fd = it.first;
         dummy_interval -= timePassed;
-        if(dummy_interval <= 0){
+        if(dummy_interval <= 0 & rc == 0 ){
             dummy_interval = GenerateRandomValue() % 5000+5000;
         
             if(!tcpConnMap.empty()) {
@@ -213,10 +213,7 @@ int main(int argc, char** argv) {
     				}
     			}
             }
-        }
-		// }
-
-        // Timeout event
+        } else
         if(0 == rc) {
             clearline();
             dprint("Next iteration at %d\n", currTimeout);
