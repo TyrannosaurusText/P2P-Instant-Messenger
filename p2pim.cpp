@@ -801,7 +801,7 @@ void checkUDPPort(int &baseTimeout, int &currTimeout) {
                             tprint("\r-----NEW HOST: %s-----\n", username_a.c_str());
                             addNewClient(incomingUDPMsg);
                             numUnauth++;
-                            tprint("num unauth is %d\n", numUnauth);
+                            // tprint("num unauth is %d\n", numUnauth);
                             sendReqAuthMessage(username_a);
                         }
                         // Should send reply regardless the host is already known
@@ -1005,10 +1005,9 @@ void checkTCPConnections() {
                         client_public_key = ntohll((client_public_key));
                         client_public_key_modulus = ntohll((client_public_key_modulus));
 						clientMap.find(newClientName)->second.which = RECEIVER;
-                        tprint("Establish encrypted communication\n");
+
+                        
                     }
-                    else
-                        tprint("Establish unencrytped communication\n");
 
                     if(clientMap.find(newClientName) == clientMap.end()) {
                         tprint("\n!!!!!UNKNOWN USER %s TRYING TO CONNECT!!!!!\n", newClientName.c_str());
@@ -1020,13 +1019,7 @@ void checkTCPConnections() {
                         continue;
                     }
 
-                    if(client_public_key != clientMap.find(newClientName)->second.public_key || client_public_key_modulus != clientMap.find(newClientName)->second.public_key_modulus)
-                    {
-                        tprint("WARNING: Unauthenticated user %s is trying to connect\n", newClientName.c_str());
-                    }
-
-                    clientMap.find(newClientName)->second.public_key_modulus = client_public_key_modulus;
-                    clientMap.find(newClientName)->second.public_key = client_public_key;
+                   
                     // tprint("key is %lu, modulus is %lu\n", client_public_key, client_public_key_modulus);
 						
                     uint8_t ECM[22];
@@ -1056,13 +1049,22 @@ void checkTCPConnections() {
                         // Send accept comm message
                         *((uint16_t*)(ECM + 4)) = type == ESTABLISH_COMM ? htons(ACCEPT_COMM) : htons(ACCEPT_ENCRYPTED_COMM);
 						//tprint("New sock FD is: %d\n", it->fd);
+
+                        clientMap.find(newClientName)->second.public_key_modulus = client_public_key_modulus;
+                        clientMap.find(newClientName)->second.public_key = client_public_key;
                         clientMap.find(newClientName)->second.tcpSockFd = it->fd;
+                        
+                        if(client_public_key != clientMap.find(newClientName)->second.public_key || client_public_key_modulus != clientMap.find(newClientName)->second.public_key_modulus)
+                        {
+                            tprint("WARNING: Unauthenticated user %s is trying to connect\n", newClientName.c_str());
+                        }
+
                         tcpConnMap[it->fd] = newClientName;
 
                         if(type == ESTABLISH_ENCRYPTED_COMM) {
-                            tprint("Establish encrypted communication\n");
 							findClientByFd(it->fd)->second.connectionType = 1;
                             uint64_t sessionKey = GenerateRandomValue();
+                            tprint("Accepting encrypted connection from: %s\n", newClientName.c_str());
 
                             // Extract high 32bit
                             uint64_t high32b = (uint32_t)(sessionKey >> 32);
@@ -1084,6 +1086,9 @@ void checkTCPConnections() {
                             *((uint64_t*)(ECM + 6)) = htonll(high32b);
                             *((uint64_t*)(ECM + 14)) = htonll(low32b);
                         }
+                        else
+                            tprint("Accepting connection from: %s\n", newClientName.c_str());
+
 
                         int wrLen = 0, j = 0;
                         while(wrLen < ECMLen) {
@@ -1091,7 +1096,6 @@ void checkTCPConnections() {
                             if(j == -1) continue;
                             wrLen += j;
                         }
-                        tprint("Accepting connection from: %s\n", newClientName.c_str());
 
                     }
 
@@ -1734,7 +1738,7 @@ void checkTCPConnections() {
 									break;
 								}
 								int pos = 6 + strlen( (char*)( client->replyUsrMsg.data()+6 ) ) + 1 + 2;
-								if( pos  > client->replyUsrMsg.size() || !probeString( client->replyUsrMsg.data()+6 + pos ,
+								if( pos  > client->replyUsrMsg.size() || !probeString( client->replyUsrMsg.data() + pos ,
 										client->replyUsrMsg.size() - pos)){ //check if userName valid
 									findClientByFd(it->fd)->second.lastEncryptedMesssageType = REPLY_USER_LIST;
 									break;
@@ -2231,13 +2235,21 @@ void checkSTDIN() {
 							{
 								if(encryptMode == 1)
 								{
-									encryptMode = 0;
-									tprint("Encryption off.\n");
+                                    if(currentConnection == -1) {
+									   encryptMode = 0;
+									   tprint("Encryption off.\n");
+                                    }
+                                    else
+                                        tprint("There is existing connection, please disconnect first\n");
 								}
 								else
 								{
-									encryptMode = 1;
-									tprint("Encryption on.\n");
+                                    if(currentConnection == -1) {
+    									encryptMode = 1;
+    									tprint("Encryption on.\n");
+                                    }
+                                    else
+                                        tprint("There is existing connection, please disconnect first\n");
 								}
 								break;
 							}
