@@ -1051,14 +1051,16 @@ void checkTCPConnections() {
                         *((uint16_t*)(ECM + 4)) = type == ESTABLISH_COMM ? htons(ACCEPT_COMM) : htons(ACCEPT_ENCRYPTED_COMM);
 						//tprint("New sock FD is: %d\n", it->fd);
 
-                        clientMap.find(newClientName)->second.public_key_modulus = client_public_key_modulus;
-                        clientMap.find(newClientName)->second.public_key = client_public_key;
-                        clientMap.find(newClientName)->second.tcpSockFd = it->fd;
-                        
                         if(client_public_key != clientMap.find(newClientName)->second.public_key || client_public_key_modulus != clientMap.find(newClientName)->second.public_key_modulus)
                         {
                             tprint("WARNING: Unauthenticated user %s is trying to connect\n", newClientName.c_str());
                         }
+
+                        clientMap.find(newClientName)->second.public_key_modulus = client_public_key_modulus;
+                        clientMap.find(newClientName)->second.public_key = client_public_key;
+                        clientMap.find(newClientName)->second.tcpSockFd = it->fd;
+                        
+                        
 
                         tcpConnMap[it->fd] = newClientName;
 
@@ -1336,6 +1338,8 @@ void checkTCPConnections() {
 
                         findClientByFd(it->fd)->second.tcpSockFd = -1;
                         findClientByFd(it->fd)->second.connectionType = 0;
+                        findClientByFd(it->fd)->second.public_key_modulus = 0;
+                        findClientByFd(it->fd)->second.public_key = 0;
 
                         if(findClientByFd(it->fd)->second.closed)
                             clientMap.erase(findClientByFd(it->fd));
@@ -1824,6 +1828,8 @@ void checkTCPConnections() {
                             if(findClientByFd(it->fd) != clientMap.end()) {
                                 findClientByFd(it->fd)->second.tcpSockFd = -1;
                                 findClientByFd(it->fd)->second.connectionType = 0;
+                                findClientByFd(it->fd)->second.public_key_modulus = 0;
+                                findClientByFd(it->fd)->second.public_key = 0;
 
                                 if(findClientByFd(it->fd)->second.closed)
                                     clientMap.erase(findClientByFd(it->fd));
