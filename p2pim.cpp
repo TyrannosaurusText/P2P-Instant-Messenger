@@ -925,7 +925,9 @@ void checkTCPConnections() {
             int recvLen, j = 0;
 
             while(j < 6) {
+	
                 recvLen = read(it->fd, incomingTCPMsg + j, 6 - j);
+				if(recvLen == -1) continue;
                 j += recvLen;
             }
 
@@ -958,7 +960,7 @@ void checkTCPConnections() {
             dprint("RECV: %d\n", type);
             dprint("SRC - %s : %d ", inet_ntoa(udpClientAddr.sin_addr), ntohs(udpClientAddr.sin_port));
             dprint("DEST - %s : %d\n", inet_ntoa(udpServerAddr.sin_addr), ntohs(udpServerAddr.sin_port));
-
+			
             switch(type) {
                 case ESTABLISH_ENCRYPTED_COMM:
                 case ESTABLISH_COMM: {
@@ -993,7 +995,7 @@ void checkTCPConnections() {
                         tprint("establish\n");
 
                     if(clientMap.find(newClientName) == clientMap.end()) {
-                        // fprintf(stderr, "\n!!!!!UNKNOWN USER TRYING TO CONNECT!!!!!\n");
+                        tprint("\n!!!!!UNKNOWN USER %s TRYING TO CONNECT!!!!!\n", newClientName.c_str());
                         sendTCPMessage(USER_UNAVALIBLE, it->fd);
 
                         // Close connection
@@ -1101,7 +1103,7 @@ void checkTCPConnections() {
                 }
                 case USER_UNAVALIBLE: {
                     // Close connection as well
-                    tprint("The user %s is currently unavailable\n", tcpConnMap.find(it->fd)->second.c_str());
+                    tprint("UNENCRThe user %s is currently unavailable\n", tcpConnMap.find(it->fd)->second.c_str());
                     if(findClientByFd(it->fd) != clientMap.end())
                         findClientByFd(it->fd)->second.tcpSockFd = -1;
                     if(tcpConnMap.find(it->fd) != tcpConnMap.end()) {
@@ -1275,9 +1277,18 @@ void checkTCPConnections() {
                     uint8_t encryptedDataChunk[65];
 					encryptedDataChunk[64] = 0;
                     // uint8_t* encryptedDataChunk = incomingTCPMsg + 6;
-                    if(read(it->fd, encryptedDataChunk, 64) < 0)
-                        die("Failed to read encryptedDataChunk");
-                    // for(int i = 0; i < 6; i++) {
+					uint8_t bytesRead = 0;
+					j=0;
+                    while(bytesRead < 64)
+					{
+						if((j = read(it->fd, encryptedDataChunk+j, 64-j)) == -1)
+						{
+							tprint("bytes read %d of 64\n", j)
+						}
+						bytesRead += j;
+                        //die("Failed to read encryptedDataChunk\n");
+                    
+					}// for(int i = 0; i < 6; i++) {
                     //     tprint("%d\t%c\t%lx\n", incomingTCPMsg[i], incomingTCPMsg[i]);
                     // } 
                     // for(int i = 0; i < 64; i++) {
@@ -1285,8 +1296,8 @@ void checkTCPConnections() {
                     // } 
 					// tprint("New sock FD is: %d\n", it->fd);
                     int newType = processEncryptedDataChunk(findClientByFd(it->fd)->second, encryptedDataChunk);
-
-                    // tprint("new type is %lx\n", (long unsigned int)newType);
+ 
+                    tprint("new type is %lx\n", (long unsigned int)newType);
 
 					if(findClientByFd(it->fd)->second.lastEncryptedMesssageType != 0)
 					{
@@ -1499,7 +1510,7 @@ void checkTCPConnections() {
                             std::string newClientName = (char*)(encryptedDataChunk + 2);
 
                             if(clientMap.find(newClientName) == clientMap.end()) {
-                                // fprintf(stderr, "\n!!!!!UNKNOWN USER TRYING TO CONNECT!!!!!\n");
+                                tprint("\n1!!!!!UNKNOWN USER %s TRYING TO CONNECT!!!!!\n", newClientName.c_str());
                                 sendTCPMessage(USER_UNAVALIBLE, it->fd);
 
                                 // Close connection
@@ -1551,7 +1562,7 @@ void checkTCPConnections() {
                         }
                         case USER_UNAVALIBLE: {
                             // Close connection as well
-                            tprint("The user %s is currently unavailable\n", tcpConnMap.find(it->fd)->second.c_str());
+                            tprint("ENCRThe user %s is currently unavailable\n", tcpConnMap.find(it->fd)->second.c_str());
                             if(findClientByFd(it->fd) != clientMap.end())
                                 findClientByFd(it->fd)->second.tcpSockFd = -1;
                             if(tcpConnMap.find(it->fd) != tcpConnMap.end()) {
@@ -1823,7 +1834,7 @@ void checkSTDIN() {
         bytesRead = read(STDIN_FILENO, &RX, 4);
         if (bytesRead < 2)
         buffer.append((const char*)RX);
-        //dprint("buffer len: %d\n", buffer.length());
+        //tprint("buffer len: %d\n", buffer.length());
         //dprint("buffer: %c\n", buffer[0]);
         if(bytesRead == 1) {
             //tprint("%c",buffer[0]);
@@ -2330,6 +2341,7 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
     *((uint16_t*)(raw_message + 4)) = ntohs(newType);
     uint64_t bytesSent = 0;
 	uint64_t seqNum;
+	uint8_t j, sent;
     while(messageLength > bytesSent) //max length encryted message is 62.
     {
 		seqNum = sessionKeyUpdate(clientInfo, SENDER);
@@ -2347,11 +2359,13 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
         // for(int i = 0; i < 70; i++) {
         //     tprint("%d\t%c\t%lx\n", encryptedDataChunk[i], encryptedDataChunk[i]);
         // }
-
-        if(0 > write(clientInfo.tcpSockFd, encryptedDataChunk, 70))
-        {
-            die("failed to send encrypted message");
-        }
+		j = 0; sent = 0;
+		while(70 > sent){
+			j = write(clientInfo.tcpSockFd, encryptedDataChunk+sent, 70-sent);
+			if(j < 0) continue;
+			sent += j;
+			tprint("Bytes sent is %d\n",sent);
+		}
     }
 }
 
