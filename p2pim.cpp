@@ -642,6 +642,7 @@ void connectToClient(std::string clientName) {
         *((uint16_t*)(ECM + 4)) = htons((encryptMode == 0 ? ESTABLISH_COMM : ESTABLISH_ENCRYPTED_COMM));
         memcpy((uint16_t*)(ECM + 6), username.c_str(), username.length());
         dprint("New client name is %s\n", username.c_str());
+
 		if(encryptMode == 1)
 		{
             tprint("Encrypting...\n");
@@ -1332,7 +1333,9 @@ void checkTCPConnections() {
                         // dprint("User listing: %s\n", a.second.username.c_str());
                     // }
                     if(findClientByFd(it->fd) != clientMap.end()) {
+
                         findClientByFd(it->fd)->second.tcpSockFd = -1;
+                        findClientByFd(it->fd)->second.connectionType = 0;
 
                         if(findClientByFd(it->fd)->second.closed)
                             clientMap.erase(findClientByFd(it->fd));
@@ -1820,6 +1823,7 @@ void checkTCPConnections() {
                             // }
                             if(findClientByFd(it->fd) != clientMap.end()) {
                                 findClientByFd(it->fd)->second.tcpSockFd = -1;
+                                findClientByFd(it->fd)->second.connectionType = 0;
 
                                 if(findClientByFd(it->fd)->second.closed)
                                     clientMap.erase(findClientByFd(it->fd));
