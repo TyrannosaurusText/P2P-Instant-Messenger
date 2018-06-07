@@ -652,8 +652,14 @@ void connectToClient(std::string clientName) {
 			clientMap.find(clientName)->second.which = SENDER;
 
 		}
-		if(write(newConn, ECM, ECMLen) < 0)
-			die("Failed to send ESTABLISH COMM message.");
+
+        int wrLen = 0, j = 0;
+        while(wrLen < ECMLen) {
+            j += write(newConn, ECM, ECMLen - wrLen);
+            wrLen += j;  
+        }
+		// if(write(newConn, ECM, ECMLen) < 0)
+		// 	die("Failed to send ESTABLISH COMM message.");
 
         // Record the newly connected tcp socket
         clientMap.find(clientName)->second.tcpSockFd = newConn;
@@ -980,10 +986,23 @@ void checkTCPConnections() {
 
                     std::string newClientName = newClientNameArr;
                     if(type == ESTABLISH_ENCRYPTED_COMM) {
-                        if(read(it->fd, &client_public_key, 8) < 0)
-                            die("Failed to read public key in ESTABLISH_ENCRYPTED_COMM");
-                        if(read(it->fd, &client_public_key_modulus, 8) < 0)
-                            die("Failed to read public key modulus in ESTABLISH_ENCRYPTED_COMM");
+                        int recvLen = 0, j = 0;
+                        while(j < 8) { 
+                            recvLen = read(it->fd, &client_public_key, 8 - j);
+                            if(j == -1) continue;
+							j += recvLen;
+                        }
+                        // if(recvLen < 0)
+                        //     die("Failed to read public key in ESTABLISH_ENCRYPTED_COMM");
+
+                        recvLen = 0, j = 0;
+                        while(j < 8) { 
+                            recvLen = read(it->fd, &client_public_key_modulus, 8 - j);
+                            if(j == -1) continue;
+							j += recvLen;
+                        }
+                        // if(read(it->fd, &client_public_key_modulus, 8) < 0)
+                        //     die("Failed to read public key modulus in ESTABLISH_ENCRYPTED_COMM");
 
                         client_public_key = ntohll((client_public_key));
                         client_public_key_modulus = ntohll((client_public_key_modulus));
@@ -1020,9 +1039,15 @@ void checkTCPConnections() {
                         // Send user unavailable message
                         *((uint16_t*)(ECM + 4)) = htons(USER_UNAVALIBLE);
 
-                        if(write(it->fd, ECM, 6) < 0) {
-                            die("Failed to establish TCP connection.");
+                        int wrLen = 0, j = 0;
+                        while(wrLen < 6) {
+                            j = write(it->fd, ECM, 6 - wrLen);
+			    if(j==-1)continue;
+                            wrLen += j;
                         }
+                        // if(write(it->fd, ECM, 6) < 0) {
+                            // die("Failed to establish TCP connection.");
+                        // }
 
                         // Close connection
                         close(it->fd);
@@ -1062,8 +1087,11 @@ void checkTCPConnections() {
                             *((uint64_t*)(ECM + 14)) = htonll(low32b);
                         }
 
-                        if(write(it->fd, ECM, ECMLen) < 0) {
-                            die("Failed to establish TCP connection.");
+                        int wrLen = 0, j = 0;
+                        while(wrLen < ECMLen) {
+                            j = write(it->fd, ECM, ECMLen - wrLen);
+                            if(j == -1) continue;
+			    wrLen += j;
                         }
                         tprint("Accepting connection from: %s\n", newClientName.c_str());
 
@@ -1078,10 +1106,23 @@ void checkTCPConnections() {
 
                     if(type == ACCEPT_ENCRYPTED_COMM) {
                         uint64_t high32b, low32b;
-                        if(read(it->fd, &high32b, 8) < 0)
-                            die("Failed to read seq high.");
-                        if(read(it->fd, &low32b, 8) < 0)
-                            die("Failed to read seq low.");
+
+                        int recvLen = 0, j = 0;
+                        while(j < 8) { 
+                            recvLen = read(it->fd, &high32b, 8 - j);
+                            if(j == -1) continue;
+                            j += recvLen;
+                        }
+
+                        recvLen = 0, j = 0;
+                        while(j < 8) { 
+                            recvLen = read(it->fd, &low32b, 8 - j);
+                            j += recvLen;
+                        }
+                        // if(read(it->fd, &high32b, 8) < 0)
+                        //     die("Failed to read seq high.");
+                        // if(read(it->fd, &low32b, 8) < 0)
+                        //     die("Failed to read seq low.");
 
                         high32b = ntohll(high32b);
                         low32b = ntohll(low32b);
@@ -1121,8 +1162,15 @@ void checkTCPConnections() {
                     *((uint16_t*)(ECM + 4)) = htons(REPLY_USER_LIST);
                     *((uint32_t*)(ECM + 6)) = htonl(clientMap.size());
 
-                    if(0 > write(it->fd, ECM, 10))
-                        die("Failed to send user list reply");
+                    int wrLen = 0, j = 0;
+                    while(wrLen < 10) {
+                        j = write(it->fd, ECM, 10 - wrLen);
+                            if(j == -1) continue;
+                        wrLen += j;
+                    }
+
+                    // if(0 > write(it->fd, ECM, 10))
+                    //     die("Failed to send user list reply");
 
                     uint8_t userEntry[8 + 256 + 32 + 2];
                     int i = 0;
@@ -1141,8 +1189,15 @@ void checkTCPConnections() {
                         memcpy(userEntry + len2Send, c.second.username.c_str(), c.second.username.length());
                         len2Send += c.second.username.length() + 1;
 
-                        if(0 > write(it->fd, userEntry, len2Send))
-                            die("Failed to send user list entry");
+                        int wrLen = 0, j = 0;
+                        while(wrLen < len2Send) {
+                            j = write(it->fd, userEntry, len2Send - wrLen);
+                            if(j == -1) continue;
+                            wrLen += j;
+                        }
+
+                        // if(0 > write(it->fd, userEntry, len2Send))
+                        //     die("Failed to send user list entry");
 
                         i++;
                     }
@@ -1159,7 +1214,13 @@ void checkTCPConnections() {
                     //     recvLen = read(it->fd, entryCountArr + j, 1);
                     //     j++;
                     // } while(j < 4);
-                    recvLen = read(it->fd, entryCountArr, 4);
+                    recvLen = 0, j = 0;
+                        while(j < 4) { 
+                            recvLen = read(it->fd, entryCountArr, 4 - j);
+                            if(j == -1) continue;
+                            j += recvLen;
+                        }
+                    // recvLen = read(it->fd, entryCountArr, 4);
 
 
                     int entryCount = ntohl(*(uint32_t*)entryCountArr);
@@ -1169,12 +1230,27 @@ void checkTCPConnections() {
                     uint8_t entryArr[8 + 256 + 32 + 2];
                     for(int k = 0; k < entryCount; k++) {
                         // Get entry number
-                        recvLen = read(it->fd, entryArr, 4);
+                        recvLen = 0, j = 0;
+                        while(j < 4) { 
+                            recvLen = read(it->fd, entryArr, 4 - j);
+                            if(j == -1) continue;
+                            j += recvLen;
+                        }
+
+                        // recvLen = read(it->fd, entryArr, 4);
                         int entryNum = ntohl(*(uint32_t*)entryArr);
                         dprint("entry num is %d\n", entryNum);
 
                         struct Client newClient;
-                        recvLen = read(it->fd, entryArr + 4, 2);
+
+                        recvLen = 0, j = 0;
+                        while(j < 2) { 
+                            recvLen = read(it->fd, entryArr + 4, 2 - j);
+                            if(j == -1) continue;
+                            j += recvLen;
+                        }
+
+                        // recvLen = read(it->fd, entryArr + 4, 2);
                         newClient.udpPort = ntohs(*((uint16_t*)(entryArr + 4)));
                         dprint("udpPort is %d\n", newClient.udpPort);
 
@@ -1287,9 +1363,9 @@ void checkTCPConnections() {
 						bytesRead += j;
                         //die("Failed to read encryptedDataChunk\n");
                     
-					} for(int i = 0; i < 6; i++) {
-                         tprint("%d\t%c\n", incomingTCPMsg[i], incomingTCPMsg[i]);
-                     } 
+					}// for(int i = 0; i < 6; i++) {
+                    //     tprint("%d\t%c\t%lx\n", incomingTCPMsg[i], incomingTCPMsg[i]);
+                    // } 
                     // for(int i = 0; i < 64; i++) {
                     //     tprint("%d\t%c\t%lx\n", encryptedDataChunk[i], encryptedDataChunk[i]);
                     // } 
@@ -1454,6 +1530,8 @@ void checkTCPConnections() {
                                 findClientByFd(it->fd)->second.fileSendingFd = open(findClientByFd(it->fd)->second.fileNameSending.c_str(), O_RDONLY);
 
                                 char buf[51];
+                                int recvLen = 0, j = 0;
+
                                 int size = read(findClientByFd(it->fd)->second.fileSendingFd, buf, 50);
                                 buf[size] = 0;
                                 // tprint("File content: %s\n", buf);
@@ -1465,14 +1543,13 @@ void checkTCPConnections() {
                                 memcpy(FDM + 18, buf, size);
 
                                 findClientByFd(it->fd)->second.fileSendingOffset += size;
+
                                 writeEncryptedDataChunk(findClientByFd(it->fd)->second, FDM, 18 + size);
-								
+
 								if(findClientByFd(it->fd)->second.fileSendingOffset < findClientByFd(it->fd)->second.fileSendingSize)
                                 for(auto& pfd : pollFd) {
                                     if(pfd.fd == it->fd) {
                                         pfd.events = POLLIN | POLLOUT;
-										sendingFile = 1;
-
                                     }
                                 }
 								else{
@@ -1487,7 +1564,6 @@ void checkTCPConnections() {
                             break;
                         }
                         case FILE_DATA_MESSAGE:{
-							tprint("something dies here\n");
                             findClientByFd(it->fd)->second.fileReceivingOffset = ntohll(*((uint64_t*)(encryptedDataChunk + 2)));
                             uint32_t dataSize = ntohl(*((uint32_t*)(encryptedDataChunk + 10)));
 
@@ -1504,7 +1580,6 @@ void checkTCPConnections() {
 								toWrite += j;
 							}
                             if(dataSize < 50) {
-								sendingFile = 0;
                                 close(findClientByFd(it->fd)->second.fileReceivingFd);
                                 findClientByFd(it->fd)->second.fileReceivingFd = -1;
                                 findClientByFd(it->fd)->second.fileReceivingOffset = 0;
@@ -2252,8 +2327,15 @@ void sendDataMessage(std::string message){
 
     //currentConnection is the fd that the client wishes to speak to.
     if(encryptMode == 0){//findClientByFd(currentConnection)->second.connectionType != 1) {
-        if(write(currentConnection,outgoingTCPMsg, message.length() + 7) < 0)
-            die("Failed to establish send data.");
+        int wrLen = 0, j = 0;
+        while(wrLen < message.length() + 7) {
+            j = write(currentConnection,outgoingTCPMsg, message.length() + 7 - wrLen);
+                            if(j == -1) continue;
+            wrLen += j;
+        }
+
+        // if(write(currentConnection,outgoingTCPMsg, message.length() + 7) < 0)
+        //     die("Failed to establish send data.");
     }
     else {
 
@@ -2363,8 +2445,8 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
             (64 < messageLength - 4 - bytesSent? 64 : messageLength - 4 - bytesSent));
 
         bytesSent += 64;
-        tprint("Encrypting with seq %lu\n", seqNum);
-        tprint("Encrypting bytes %lu of %lu\n", (unsigned long)bytesSent, (unsigned long)messageLength);
+        // tprint("Encrypting with seq %lu\n", seqNum);
+        //tprint("Encrypting bytes %lu of %lu\n", (unsigned long)bytesSent, (unsigned long)messageLength);
  		
         PrivateEncryptDecrypt(encryptedDataChunk + 6, 64, seqNum);
 
@@ -2388,10 +2470,10 @@ uint16_t processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encrypted
 	uint64_t seqNum = sessionKeyUpdate(clientInfo, RECEIVER);
     // tprint("Decrypting with seq %lu\n", seqNum);
     PrivateEncryptDecrypt(encryptedDataChunk, 64, seqNum);
-	for(int i = 0; i < 64; i ++)
-	{
-		tprint("%c, %d \n", encryptedDataChunk[i], encryptedDataChunk[i]);
-	}
+//	for(int i = 0; i < 64; i ++)
+//	{
+//		tprint("%c, %d \n", encryptedDataChunk[i], encryptedDataChunk[i]);
+//	}
     uint16_t type = getType(encryptedDataChunk - 4); //"P2PI0x000D(TYPE)";
     //tprint("type is %lx\n", (long unsigned int)type);
     uint16_t newType = 0;
