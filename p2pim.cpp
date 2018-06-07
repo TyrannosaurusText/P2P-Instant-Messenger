@@ -71,6 +71,7 @@ int taUDPPort = 50552;
 int gMinTimeout = 5000;
 int gMaxTimeout = 60000;
 int encryptMode = 0;
+int sendingFile = 0;
 struct in_addr gIPAddr, gSubnetMask;
 
 uint8_t outgoingUDPMsg[MAX_UDP_MSG_LEN];
@@ -931,9 +932,7 @@ void checkTCPConnections() {
                 j += recvLen;
             }
 
-            for(int i = 0; i < 6; i++) {
-                tprint("%u, %c\n", incomingTCPMsg[i]);
-            }
+            
             // Invalid signature, close connection
             if(memcmp("P2PI", incomingTCPMsg, 4) != 0 &&
                 (findClientByFd(it->fd) != clientMap.end() &&
@@ -1272,7 +1271,7 @@ void checkTCPConnections() {
                     continue;
                 }
 				case ENCRYPTED_DATA_CHUNK_MESSAGE: {
-                    tprint("ENCRYPTED_DATA_CHUNK_MESSAGE\n");
+                    //tprint("ENCRYPTED_DATA_CHUNK_MESSAGE\n");
 
                     uint8_t encryptedDataChunk[65];
 					encryptedDataChunk[64] = 0;
@@ -1288,16 +1287,17 @@ void checkTCPConnections() {
 						bytesRead += j;
                         //die("Failed to read encryptedDataChunk\n");
                     
-					}// for(int i = 0; i < 6; i++) {
-                    //     tprint("%d\t%c\t%lx\n", incomingTCPMsg[i], incomingTCPMsg[i]);
-                    // } 
+					} for(int i = 0; i < 6; i++) {
+                         tprint("%d\t%c\n", incomingTCPMsg[i], incomingTCPMsg[i]);
+                     } 
                     // for(int i = 0; i < 64; i++) {
                     //     tprint("%d\t%c\t%lx\n", encryptedDataChunk[i], encryptedDataChunk[i]);
                     // } 
 					// tprint("New sock FD is: %d\n", it->fd);
+					
                     int newType = processEncryptedDataChunk(findClientByFd(it->fd)->second, encryptedDataChunk);
  
-                    tprint("new type is %lx\n", (long unsigned int)newType);
+                    tprint("neaw type is %lx\n", (long unsigned int)newType);
 
 					if(findClientByFd(it->fd)->second.lastEncryptedMesssageType != 0)
 					{
@@ -1465,13 +1465,14 @@ void checkTCPConnections() {
                                 memcpy(FDM + 18, buf, size);
 
                                 findClientByFd(it->fd)->second.fileSendingOffset += size;
-
                                 writeEncryptedDataChunk(findClientByFd(it->fd)->second, FDM, 18 + size);
-
+								
 								if(findClientByFd(it->fd)->second.fileSendingOffset < findClientByFd(it->fd)->second.fileSendingSize)
                                 for(auto& pfd : pollFd) {
                                     if(pfd.fd == it->fd) {
                                         pfd.events = POLLIN | POLLOUT;
+										sendingFile = 1;
+
                                     }
                                 }
 								else{
@@ -1486,17 +1487,24 @@ void checkTCPConnections() {
                             break;
                         }
                         case FILE_DATA_MESSAGE:{
+							tprint("something dies here\n");
                             findClientByFd(it->fd)->second.fileReceivingOffset = ntohll(*((uint64_t*)(encryptedDataChunk + 2)));
                             uint32_t dataSize = ntohl(*((uint32_t*)(encryptedDataChunk + 10)));
 
                             char msg[51];
                             memcpy(msg, encryptedDataChunk + 14, dataSize);
                             msg[dataSize] = 0;
-                            tprint("File offset is %lu and data is %s\n", findClientByFd(it->fd)->second.fileReceivingOffset);
+                            tprint("File offset is %lu, datasize is: %d\n", findClientByFd(it->fd)->second.fileReceivingOffset, dataSize);
 
-                            write(findClientByFd(it->fd)->second.fileReceivingFd, encryptedDataChunk + 14, dataSize);
-
+                            uint8_t toWrite, j;
+							while(toWrite < dataSize)
+							{
+								j = write(findClientByFd(it->fd)->second.fileReceivingFd, encryptedDataChunk + 14 + toWrite, dataSize-toWrite);
+								if(j == -1) continue;
+								toWrite += j;
+							}
                             if(dataSize < 50) {
+								sendingFile = 0;
                                 close(findClientByFd(it->fd)->second.fileReceivingFd);
                                 findClientByFd(it->fd)->second.fileReceivingFd = -1;
                                 findClientByFd(it->fd)->second.fileReceivingOffset = 0;
@@ -1616,10 +1624,10 @@ void checkTCPConnections() {
                                 i++;
                             }
 							writeEncryptedDataChunk(findClientByFd(it->fd)->second, userEntrySTR.data(), userEntrySTR.size());
-							for(int i = 0; i < userEntrySTR.size(); i++)
+/* 							for(int i = 0; i < userEntrySTR.size(); i++)
 							{
 								tprint("%d, %d %c\n",i, userEntrySTR.at(i), userEntrySTR.at(i));
-							}
+							} */
                             break;
                         }
                         case REPLY_USER_LIST: {
@@ -1783,6 +1791,8 @@ void checkTCPConnections() {
                     for(auto& pfd : pollFd) {
                         if(pfd.fd == it->fd) {
                             pfd.events = POLLIN;
+							sendingFile = 0;
+
                         }
                     }
 
@@ -1884,6 +1894,7 @@ void checkSTDIN() {
 						fileTransferOffer.erase(fileTransferOffer.begin(), fileTransferOffer.begin() + 1);
 
                         if(firstWord == "yes") {
+							sendingFile = 1;
                             findClientByFd(offer.portNum)->second.fileReceivingFd = open(findClientByFd(offer.portNum)->second.fileNameReceiving.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
                             tprint("port is %d and fd is %d\n", offer.portNum, findClientByFd(offer.portNum)->second.fileReceivingFd);
                         }
@@ -1896,6 +1907,7 @@ void checkSTDIN() {
 				}
 				else{
 					if(commandMap.find(firstWord) != commandMap.end()) {
+						if(sendingFile == 0)
 						switch(commandMap[firstWord]) {
 							case SENDFILE: {
                                 std::string user = "";
@@ -2341,8 +2353,8 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
     *((uint16_t*)(raw_message + 4)) = ntohs(newType);
     uint64_t bytesSent = 0;
 	uint64_t seqNum;
-	uint8_t j, sent;
-    while(messageLength > bytesSent) //max length encryted message is 62.
+	int j, sent;
+    while(messageLength-4 > bytesSent) //max length encryted message is 62.
     {
 		seqNum = sessionKeyUpdate(clientInfo, SENDER);
         GenerateRandomString(encryptedDataChunk + 6, 64, seqNum);
@@ -2351,8 +2363,8 @@ void writeEncryptedDataChunk(struct Client& clientInfo, uint8_t* raw_message, ui
             (64 < messageLength - 4 - bytesSent? 64 : messageLength - 4 - bytesSent));
 
         bytesSent += 64;
-        // tprint("Encrypting with seq %lu\n", seqNum);
-        //tprint("Encrypting bytes %lu of %lu\n", (unsigned long)bytesSent, (unsigned long)messageLength);
+        tprint("Encrypting with seq %lu\n", seqNum);
+        tprint("Encrypting bytes %lu of %lu\n", (unsigned long)bytesSent, (unsigned long)messageLength);
  		
         PrivateEncryptDecrypt(encryptedDataChunk + 6, 64, seqNum);
 
@@ -2376,6 +2388,10 @@ uint16_t processEncryptedDataChunk(struct Client& clientInfo, uint8_t* encrypted
 	uint64_t seqNum = sessionKeyUpdate(clientInfo, RECEIVER);
     // tprint("Decrypting with seq %lu\n", seqNum);
     PrivateEncryptDecrypt(encryptedDataChunk, 64, seqNum);
+	for(int i = 0; i < 64; i ++)
+	{
+		tprint("%c, %d \n", encryptedDataChunk[i], encryptedDataChunk[i]);
+	}
     uint16_t type = getType(encryptedDataChunk - 4); //"P2PI0x000D(TYPE)";
     //tprint("type is %lx\n", (long unsigned int)type);
     uint16_t newType = 0;
