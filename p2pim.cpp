@@ -1272,7 +1272,7 @@ void checkTCPConnections() {
                         // get username
                         do {
                             recvLen = read(it->fd, entryArr + 6 + n + newClient.hostName.length() + 1 + 2, 1);
-                            dprint("%d %c\n", n, *(char*)(entryArr + 6 + n + newClient.hostName.length() + 1 + 2));
+                            // dprint("%d %c\n", n, *(char*)(entryArr + 6 + n + newClient.hostName.length() + 1 + 2));
 
                             if(entryArr[6 + n + newClient.hostName.length() + 1 + 2] == 0)
                                 break;
@@ -1587,6 +1587,7 @@ void checkTCPConnections() {
 							}
                             if(dataSize < 50) {
                                 sendingFile = 0;
+                                tprint("Done receiving file %s\n", findClientByFd(it->fd)->second.fileNameReceiving.c_str());
                                 close(findClientByFd(it->fd)->second.fileReceivingFd);
                                 findClientByFd(it->fd)->second.fileReceivingFd = -1;
                                 findClientByFd(it->fd)->second.fileReceivingOffset = 0;
@@ -1719,10 +1720,10 @@ void checkTCPConnections() {
 							// tprint("Entry Count is: %d \n", client->entryCount);
 							client->replyUsrMsg.erase(client->replyUsrMsg.begin(),client->replyUsrMsg.begin()+4);
  							for(int k = 0; k < client->entryCount; k++) {
-								for(int i = 0; i < client->replyUsrMsg.size(); i++)
-								{
-									tprint("%d: %c %d \n", i, client->replyUsrMsg[i], client->replyUsrMsg[i]);
-								}
+								// for(int i = 0; i < client->replyUsrMsg.size(); i++)
+								// {
+								// 	tprint("%d: %c %d \n", i, client->replyUsrMsg[i], client->replyUsrMsg[i]);
+								// }
 								if(client->replyUsrMsg.size() < 12) //guarenteed that there is not a complete client
 								{
 									findClientByFd(it->fd)->second.lastEncryptedMesssageType = REPLY_USER_LIST;
@@ -1970,6 +1971,7 @@ void checkSTDIN() {
 						fileTransferOffer.erase(fileTransferOffer.begin(), fileTransferOffer.begin() + 1);
 
                         if(firstWord == "yes") {
+                            tprint("Start receving file %s\n", findClientByFd(offer.portNum)->second.fileNameReceiving.c_str());
 							sendingFile = 1;
                             findClientByFd(offer.portNum)->second.fileReceivingFd = open(findClientByFd(offer.portNum)->second.fileNameReceiving.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
                             // tprint("port is %d and fd is %d\n", offer.portNum, findClientByFd(offer.portNum)->second.fileReceivingFd);
@@ -2145,7 +2147,8 @@ void checkSTDIN() {
 								tprint("\\unaway\n\t-brings self back from away.\n");
 								tprint("\\block username\n\t-when you don't want to talk to that person\n");
 								tprint("\\unblock username\n\t-when you want to become friend with someone again\n");
-								tprint("\\encrypt\n\t- enables/disables encrypted sending");
+                                tprint("\\encrypt\n\t- enables/disables encrypted sending\n");
+								tprint("\\sendf filename [username]\n\t- transfer a file to a user\n");
 								tprint("\\exit\n\t- closes program\n");
 								break;
 							}
